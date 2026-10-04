@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cv_load_failed">Couldn’t load</string>
+    <string name="cv_retry">Retry</string>
+    <string name="cv_held_title_many">New contacts</string>
+    <string name="cv_held_body_many">To verify: %1$d</string>
+    <string name="cv_unread">%1$d unread</string>
+    <string name="cv_voice_speed">Playback speed</string>
+    <string name="cv_voice_lock">Lock recording</string>
+    <string name="cv_voice_busy">Microphone is in use</string>
+    <string name="cv_media_unreadable">Couldn’t read the file</string>
+    <string name="cv_media_memory">Image is too large</string>
+    <string name="cv_media_expired">No longer available</string>
+    <string name="cv_caption_hint">Caption</string>
+    <string name="cv_search_chat_hint">Search in chat</string>
+    <string name="cv_clear">Clear</string>
+    <string name="cv_contact_profile_name">Profile name</string>
+    <string name="cv_msg_share">Share</string>
+</resources>

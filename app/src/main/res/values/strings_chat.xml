@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cv_load_failed">Не удалось загрузить</string>
+    <string name="cv_retry">Повторить</string>
+    <string name="cv_held_title_many">Новые контакты</string>
+    <string name="cv_held_body_many">Нужно сверить: %1$d</string>
+    <string name="cv_unread">Непрочитанных: %1$d</string>
+    <string name="cv_voice_speed">Скорость воспроизведения</string>
+    <string name="cv_voice_lock">Зафиксировать запись</string>
+    <string name="cv_voice_busy">Микрофон занят</string>
+    <string name="cv_media_unreadable">Не удалось прочитать файл</string>
+    <string name="cv_media_memory">Изображение слишком большое</string>
+    <string name="cv_media_expired">Файл больше недоступен</string>
+    <string name="cv_caption_hint">Подпись</string>
+    <string name="cv_search_chat_hint">Поиск в чате</string>
+    <string name="cv_clear">Очистить</string>
+    <string name="cv_contact_profile_name">Имя в профиле</string>
+    <string name="cv_msg_share">Поделиться</string>
+</resources>

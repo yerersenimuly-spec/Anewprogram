@@ -25,16 +25,16 @@
     <string name="status_failed">Жіберілмеді</string>
 
     <string name="err_no_connection">Байланыс жоқ. Интернетті тексеріңіз.</string>
-    <string name="err_number_not_found">Мұндай нөмір жоқ</string>
+    <string name="err_number_not_found">Нөмір табылмады</string>
     <string name="err_blocked">Нөмір бұғатталған</string>
     <string name="err_chat_disabled">Хабарламалар уақытша өшірулі</string>
     <string name="err_try_later">Сервер бос емес. Кейінірек қайталаңыз.</string>
     <string name="err_verify_first">Алдымен қауіпсіздік кодын салыстырыңыз</string>
-    <string name="err_generic">Әрекет орындалмады</string>
-    <string name="err_identity_changed">Байланыстың кілті өзгерді. Қауіпсіздік кодын салыстырыңыз.</string>
-    <string name="err_different_server">Бұл нөмір басқа серверге байланған</string>
-    <string name="err_mic_required">Баптауларда микрофонға рұқсат беріңіз</string>
-    <string name="err_own_number">Бұл — сіздің нөміріңіз. Әңгімелесушінің нөмірін енгізіңіз.</string>
+    <string name="err_generic">Орындалмады. Қайтадан көріңіз.</string>
+    <string name="err_identity_changed">Әңгімелесушінің кілті өзгерді. Қауіпсіздік кодын салыстырыңыз.</string>
+    <string name="err_different_server">Бұл нөмір басқа серверге тіркелген</string>
+    <string name="err_mic_required">Баптаулардан микрофонға рұқсат беріңіз</string>
+    <string name="err_own_number">Бұл — өз нөміріңіз. Әңгімелесушінің нөмірін енгізіңіз.</string>
     <string name="err_number_format">Нөмір 8 саннан тұрады</string>
 
     <string name="notice_call_declined">Қоңырау қабылданбады</string>
@@ -52,16 +52,16 @@
     <string name="notice_server_message_rejected">Сервер хабарламасы қабылданбады</string>
     <string name="notice_operation_failed">Орындалмады. Желі мен қауіпсіздік кодын тексеріңіз.</string>
 
-    <string name="chats_empty_title">Әзірге чат жоқ</string>
-    <string name="chats_empty_body">Әңгімені бастау үшін әңгімелесушінің нөмірін енгізіңіз.</string>
+    <string name="chats_empty_title">Чаттар әлі жоқ</string>
+    <string name="chats_empty_body">Әңгімелесушінің нөмірінен бастаңыз</string>
     <string name="chats_new">Жаңа чат</string>
     <string name="chats_search">Іздеу</string>
     <string name="chats_you_prefix">Сіз: %1$s</string>
     <string name="held_title">Жаңа байланыс</string>
-    <string name="held_body">%1$s сізге жазды. Хабарламаны оқу үшін қауіпсіздік кодын салыстырыңыз.</string>
+    <string name="held_body">%1$s жазды</string>
     <string name="held_action">Салыстыру</string>
     <string name="chat_open">Чатты ашу</string>
-    <string name="chat_delete_history">Тарихты тазалау</string>
+    <string name="chat_delete_history">Тарихты тазарту</string>
     <string name="preview_photo">Фото</string>
     <string name="preview_voice">Дауыстық хабарлама</string>
     <string name="preview_file">Файл</string>
@@ -71,32 +71,32 @@
     <string name="newchat_title">Жаңа чат</string>
     <string name="newchat_number_hint">Әңгімелесушінің нөмірі</string>
     <string name="newchat_name_hint">Аты (міндетті емес)</string>
-    <string name="newchat_open">Ашу</string>
+    <string name="newchat_open">Жалғастыру</string>
 
     <string name="conv_message_hint">Хабарлама</string>
-    <string name="conv_verify_banner">Бастау үшін қауіпсіздік кодын салыстырыңыз</string>
+    <string name="conv_verify_banner">Жазысуды бастау үшін қауіпсіздік кодын салыстырыңыз</string>
     <string name="conv_verify_action">Салыстыру</string>
     <string name="conv_menu_search">Чаттан іздеу</string>
     <string name="conv_menu_verify">Қауіпсіздік коды</string>
     <string name="conv_menu_rename">Атын өзгерту</string>
-    <string name="conv_menu_clear">Тарихты тазалау</string>
-    <string name="conv_clear_title">Тарихты тазалау керек пе?</string>
-    <string name="conv_clear_body">Хабарламалар тек осы құрылғыдан жойылады. Әңгімелесушіде сақталады.</string>
-    <string name="conv_clear_confirm">Тазалау</string>
+    <string name="conv_menu_clear">Тарихты тазарту</string>
+    <string name="conv_clear_title">Тарихты тазарту керек пе?</string>
+    <string name="conv_clear_body">Хабарламалар тек осы құрылғыдан жойылады. Әңгімелесушіде олар сақталады.</string>
+    <string name="conv_clear_confirm">Тазарту</string>
     <string name="conv_call">Қоңырау шалу</string>
     <string name="conv_attach">Тіркеу</string>
     <string name="conv_send">Жіберу</string>
     <string name="conv_voice">Дауыстық хабарлама</string>
-    <string name="conv_empty_title">Әңгімені бастаңыз</string>
-    <string name="conv_empty_body">Хабарламалар соңына дейін шифрланған.</string>
-    <string name="conv_scroll_down">Соңғы хабарламалар</string>
+    <string name="conv_empty_title">Хабарламалар әлі жоқ</string>
+    <string name="conv_empty_body">Хабарламалар соңынан соңына дейін шифрланған</string>
+    <string name="conv_scroll_down">Соңғы хабарламаларға</string>
     <string name="conv_rename_title">Байланыс аты</string>
-    <string name="conv_rename_hint">Тізімдегі атыңыз</string>
+    <string name="conv_rename_hint">Аты, тек сізге көрінеді</string>
 
     <string name="msg_copy">Көшіру</string>
     <string name="msg_retry">Қайта жіберу</string>
     <string name="msg_save">Сақтау</string>
-    <string name="msg_delete">Осы құрылғыдан жою</string>
+    <string name="msg_delete">Жою</string>
     <string name="msg_delete_title">Хабарламаны жою керек пе?</string>
     <string name="msg_delete_body">Ол тек осы құрылғыдан жойылады.</string>
     <string name="msg_open">Ашу</string>
@@ -108,24 +108,24 @@
     <string name="attach_send_file">Файлды жіберу</string>
     <string name="attach_send">Жіберу</string>
 
-    <string name="voice_hold_hint">Жазу үшін батырманы басып тұрыңыз</string>
-    <string name="voice_slide_cancel">Солға — бас тарту</string>
+    <string name="voice_hold_hint">Жазу үшін басып тұрыңыз</string>
+    <string name="voice_slide_cancel">Бас тарту — солға</string>
     <string name="voice_recording">Жазылуда</string>
     <string name="voice_cancel">Бас тарту</string>
     <string name="voice_send">Жіберу</string>
-    <string name="voice_too_short">Хабарлама тым қысқа</string>
+    <string name="voice_too_short">Тым қысқа</string>
     <string name="voice_play">Ойнату</string>
     <string name="voice_pause">Кідірту</string>
 
-    <string name="media_download">Жүктеу</string>
+    <string name="media_download">Жүктеп алу</string>
     <string name="media_downloading">Жүктелуде…</string>
-    <string name="media_failed">Жүктеу мүмкін болмады</string>
+    <string name="media_failed">Жүктелмеді</string>
     <string name="media_retry">Қайталау</string>
     <string name="media_too_large">Файл 25 МБ-тан үлкен</string>
-    <string name="media_peer_old">Әңгімелесуші Line-ның ескі нұсқасын пайдаланады және файлды ала алмайды. Қолданбаны жаңартуды сұраңыз.</string>
-    <string name="media_unsupported_image">Суретті ашу мүмкін болмады</string>
+    <string name="media_peer_old">Әңгімелесушіде Line-дың ескі нұсқасы, файл жетпейді. Қолданбаны жаңартуын сұраңыз.</string>
+    <string name="media_unsupported_image">Бұл форматқа қолдау жоқ</string>
     <string name="media_saved">Сақталды</string>
-    <string name="media_no_app">Файлды ашатын қолданба жоқ</string>
+    <string name="media_no_app">Лайықты қолданба жоқ</string>
     <string name="size_b">%1$d Б</string>
     <string name="size_kb">%1$s КБ</string>
     <string name="size_mb">%1$s МБ</string>
@@ -134,9 +134,8 @@
     <string name="contact_number">Нөмір</string>
     <string name="contact_verified">Тексерілген</string>
     <string name="contact_not_verified">Тексерілмеген</string>
-    <string name="contact_verify">Қауіпсіздік кодын салыстыру</string>
     <string name="contact_security_title">Қауіпсіздік коды</string>
-    <string name="contact_security_body">Бұл кодты әңгімелесушінің кодымен жүзбе-жүз немесе басқа байланыс арнасы арқылы салыстырыңыз. Кодтар сәйкес келсе, хат алмасу қорғалған.</string>
+    <string name="contact_security_body">Кодты әңгімелесушінің кодымен салыстырыңыз — жүздесіп немесе басқа байланыс арнасы арқылы.</string>
     <string name="contact_match">Кодтар сәйкес</string>
     <string name="contact_later">Кейін</string>
 
