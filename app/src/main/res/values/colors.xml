@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#F4F5F8</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_raised">#ECEEF3</color>
+    <color name="surface_press">#E2E5EB</color>
+    <color name="outline">#E0E3E9</color>
+    <color name="text_primary">#0E1116</color>
+    <color name="text_secondary">#566072</color>
+    <color name="text_tertiary">#8A93A4</color>
+    <color name="accent">#3F6FF0</color>
+    <color name="accent_start">#4A7BF7</color>
+    <color name="accent_end">#6B52EF</color>
+    <color name="accent_soft">#E6EDFF</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="bubble_in">#FFFFFF</color>
+    <color name="bubble_in_text">#0E1116</color>
+    <color name="bubble_in_meta">#7C8698</color>
+    <color name="bubble_out_start">#4A7BF7</color>
+    <color name="bubble_out_end">#6B52EF</color>
+    <color name="bubble_out_text">#FFFFFF</color>
+    <color name="bubble_out_meta">#D8E0FF</color>
+    <color name="tick_read">#BFF0FF</color>
+    <color name="positive">#1FAF6B</color>
+    <color name="negative">#E5484D</color>
+    <color name="warning">#C98A00</color>
+    <color name="scrim">#990E1116</color>
+    <color name="call_top">#101A3D</color>
+    <color name="call_bottom">#0B0D11</color>
+</resources>

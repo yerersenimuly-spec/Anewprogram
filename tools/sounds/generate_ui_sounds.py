@@ -128,36 +128,37 @@ def write_wav(path: Path, x: np.ndarray) -> bytes:
     return pcm
 
 
-BELL = ((1.0, 1.0), (2.0, 0.28), (3.0, 0.09), (0.5, 0.16))
-THUD = ((1.0, 1.0), (2.0, 0.7), (3.0, 0.3))
+BELL = ((1.0, 1.0), (2.0, 0.28), (3.0, 0.07), (0.5, 0.16))
+THUD = ((1.0, 1.0), (2.0, 0.5), (3.0, 0.14))
+ROUND = ((1.0, 1.0), (2.0, 0.08))
 
 CUES: tuple[Cue, ...] = (
-    # Dry wooden tick: octave pair, short pitch scoop and an inharmonic partial for the transient.
-    Cue("ui_tap", 32, -13.5, 2.0, (
-        Note(0, "D6", 4.5, scoop_st=7, scoop_tau_ms=2.5, attack_ms=2.0, partials=((1.0, 1.0), (2.76, 0.22)), damping=0.5),
-        Note(0, "D5", 6.5, attack_ms=2.0, gain=0.5),
+    # Dry, soft tick: D5 body with a tiny pitch scoop and upper partials that die within ~3 ms.
+    Cue("ui_tap", 32, -12.5, 2.0, (
+        Note(0, "D5", 5.5, scoop_st=5, scoop_tau_ms=3.0, attack_ms=2.0, partials=((1.0, 1.0), (2.0, 0.38), (3.0, 0.12)), damping=0.8),
     )),
     # One rising pop: D5 glides up to A5 with a faint octave partial.
-    Cue("ui_send", 150, -6.5, 3.0, (
+    Cue("ui_send", 150, -6.2, 3.0, (
         Note(0, "A5", 32, glide_from="D5", glide_tau_ms=22, attack_ms=3.0, partials=((1.0, 1.0), (2.0, 0.18)), damping=0.4),
     )),
-    # Soft falling "ding-dong": F#5 then D5, round and lower than send.
+    # Soft falling "ding-dong": F#5 then D5, rounder and lower than send (barely any FM attack).
     Cue("ui_receive", 200, -8.5, 4.0, (
-        Note(0, "F#5", 34, attack_ms=4.0, partials=((1.0, 1.0), (2.0, 0.10)), fm=(2.0, 0.35, 14)),
-        Note(78, "D5", 48, attack_ms=4.0, gain=0.92, partials=((1.0, 1.0), (2.0, 0.10)), fm=(2.0, 0.35, 14)),
+        Note(0, "F#5", 34, attack_ms=4.0, partials=ROUND, fm=(2.0, 0.15, 10)),
+        Note(78, "D5", 46, attack_ms=4.0, gain=0.92, partials=ROUND, fm=(2.0, 0.15, 10)),
     )),
-    # Two muted low thuds, A3 then F#3 (descending minor third), energy kept above phone-speaker cutoff.
-    Cue("ui_error", 220, -8.0, 3.0, (
-        Note(0, "A3", 34, scoop_st=5, scoop_tau_ms=12, attack_ms=3.0, partials=THUD, damping=0.35),
-        Note(92, "F#3", 46, scoop_st=4, scoop_tau_ms=12, attack_ms=3.0, gain=0.9, partials=THUD, damping=0.35),
+    # Two muted low thuds, D4 then B3 (descending minor third). Upper partials die fast, leaving a
+    # round body; the 2nd/3rd partials carry the cue on phone speakers that cannot reproduce ~250 Hz.
+    Cue("ui_error", 220, -7.0, 3.0, (
+        Note(0, "D4", 40, scoop_st=4, scoop_tau_ms=10, attack_ms=3.0, partials=THUD, damping=1.2),
+        Note(92, "B3", 52, scoop_st=3, scoop_tau_ms=10, attack_ms=3.0, gain=0.9, partials=THUD, damping=1.2),
     )),
     Cue("ui_toggle_on", 70, -13.5, 2.0, (
-        Note(0, "A5", 9, attack_ms=2.0, partials=((1.0, 1.0), (2.0, 0.12))),
-        Note(30, "E6", 11, attack_ms=2.0, gain=0.95, partials=((1.0, 1.0), (2.0, 0.10))),
+        Note(0, "A5", 9, attack_ms=2.0, partials=((1.0, 1.0), (2.0, 0.10))),
+        Note(30, "E6", 11, attack_ms=2.0, gain=0.95, partials=((1.0, 1.0), (2.0, 0.08))),
     )),
     Cue("ui_toggle_off", 70, -14.5, 2.0, (
-        Note(0, "E6", 9, attack_ms=2.0, partials=((1.0, 1.0), (2.0, 0.08))),
-        Note(30, "A5", 11, attack_ms=2.0, gain=0.95, partials=((1.0, 1.0), (2.0, 0.08))),
+        Note(0, "E6", 9, attack_ms=2.0, partials=((1.0, 1.0), (2.0, 0.06))),
+        Note(30, "A5", 11, attack_ms=2.0, gain=0.95, partials=((1.0, 1.0), (2.0, 0.06))),
     )),
     Cue("ui_record_start", 95, -14.0, 2.5, (
         Note(0, "D5", 24, glide_from="A4", glide_tau_ms=14, attack_ms=2.5, partials=((1.0, 1.0), (2.0, 0.12))),
@@ -166,14 +167,14 @@ CUES: tuple[Cue, ...] = (
         Note(0, "A4", 32, glide_from="E5", glide_tau_ms=30, attack_ms=2.5, partials=((1.0, 1.0), (2.0, 0.08))),
     )),
     # Warm rising chime: D5 then A5 (perfect fifth), sub-octave body and a short FM mallet transient.
-    Cue("ui_call_connected", 330, -9.0, 4.0, (
-        Note(0, "D5", 62, attack_ms=4.0, partials=BELL, damping=0.5, fm=(3.5, 0.5, 12)),
-        Note(105, "A5", 85, attack_ms=4.0, gain=0.95, partials=BELL, damping=0.5, fm=(3.5, 0.5, 12)),
+    Cue("ui_call_connected", 330, -8.5, 4.0, (
+        Note(0, "D5", 62, attack_ms=4.0, partials=BELL, damping=0.5, fm=(3.5, 0.25, 9)),
+        Note(105, "A5", 85, attack_ms=4.0, gain=0.95, partials=BELL, damping=0.5, fm=(3.5, 0.25, 9)),
     )),
     # Descending counterpart: A5 then D5, darker (weaker transient) and a little shorter.
-    Cue("ui_call_ended", 280, -9.0, 4.0, (
-        Note(0, "A5", 52, attack_ms=4.0, partials=BELL, damping=0.5, fm=(3.5, 0.3, 10)),
-        Note(95, "D5", 74, attack_ms=4.0, gain=0.95, partials=BELL, damping=0.5, fm=(3.5, 0.3, 10)),
+    Cue("ui_call_ended", 280, -8.5, 4.0, (
+        Note(0, "A5", 52, attack_ms=4.0, partials=BELL, damping=0.5, fm=(3.5, 0.14, 8)),
+        Note(95, "D5", 74, attack_ms=4.0, gain=0.95, partials=BELL, damping=0.5, fm=(3.5, 0.14, 8)),
     )),
 )
 

@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { isIP } from 'node:net';
@@ -6,10 +6,19 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { WebSocket, WebSocketServer } from 'ws';
+import { createBlobStore } from './blobs.js';
+import {
+  consumeRateLimit, createRateLimiter, hasOnlyKeys, isObject, NUMBER_PATTERN, readBooleanSetting, readIntegerSetting,
+  UUID_PATTERN, atomicWriteJson,
+} from './common.js';
+import { MISSED_CALL_TTL_MS, loadMissedCalls, pruneMissedCalls, saveMissedCalls } from './missed.js';
+import { loadProfiles, normalizeProfileName, saveProfiles } from './profiles.js';
+import {
+  CALL_ENDED_PUSH_REASONS, PUSH_ENDPOINT_GONE, createCoalescer, createPushLayer, loadPushEndpoints, parsePushRegistration,
+  readApnsConfig, sameEndpoint, savePushEndpoints,
+} from './push.js';
 
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
-const NUMBER_PATTERN = /^\d{8}$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_PAYLOAD = 64 * 1024;
 const MAX_ENVELOPE_BYTES = 24 * 1024;
 const MAX_BUFFERED_BYTES = 512 * 1024;
@@ -24,6 +33,17 @@ const MIN_PUSH_TOKEN_BYTES = 25;
 const MAX_PUSH_TOKEN_BYTES = 4_096;
 const MESSAGE_PUSH_TTL_MS = 24 * 60 * 60 * 1_000;
 const CALL_PUSH_TTL_MS = 45_000;
+const PROTOCOL_VERSION = 8;
+const FEATURES = Object.freeze(['profile', 'push', 'receipts', 'missed_calls', 'attachments', 'call_resume']);
+const DEFAULT_CALL_RESUME_GRACE_MS = 15_000;
+const MAX_CALL_RESUME_GRACE_MS = 60_000;
+const DEFAULT_PUSH_COALESCE_MS = 1_500;
+const MEBIBYTE = 1024 * 1024;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const BLOB_REQUEST_SHAPES = Object.freeze({
+  blob_create: ['type', 'requestId', 'id', 'to', 'size'],
+  blob_get: ['type', 'requestId', 'id'],
+});
 const DEFAULT_ADMIN_SETTINGS = Object.freeze({
   callsEnabled: true,
   chatEnabled: true,
@@ -31,14 +51,6 @@ const DEFAULT_ADMIN_SETTINGS = Object.freeze({
   maxParticipants: 8,
 });
 const ADMIN_EVENT_LIMIT = 100;
-
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function hasOnlyKeys(value, keys) {
-  return Object.keys(value).every((key) => keys.includes(key));
-}
 
 function validBase64(value, maxBytes) {
   if (typeof value !== 'string' || value.length === 0 || value.length > Math.ceil(maxBytes / 3) * 4) return false;
@@ -137,30 +149,6 @@ async function saveIdentities(dataFile, identities) {
     const file = await open(temporaryFile, 'wx', 0o600);
     try {
       await file.writeFile(data, 'utf8');
-      await file.sync();
-    } finally {
-      await file.close();
-    }
-    await rename(temporaryFile, dataFile);
-    try {
-      const directory = await open(dirname(dataFile), 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
-    } catch {
-      // Some filesystems do not allow syncing directory handles.
-    }
-  } catch (error) {
-    await unlink(temporaryFile).catch(() => {});
-    throw error;
-  }
-}
-
-async function atomicWriteJson(dataFile, document) {
-  await mkdir(dirname(dataFile), { recursive: true });
-  const temporaryFile = `${dataFile}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    const file = await open(temporaryFile, 'wx', 0o600);
-    try {
-      await file.writeFile(`${JSON.stringify(document, null, 2)}\n`, 'utf8');
       await file.sync();
     } finally {
       await file.close();
@@ -301,56 +289,6 @@ async function loadPushTokens(pushFile, numberOwners, blockedNumbers) {
     tokens.set(number, token);
   }
   return { tokens, dirty };
-}
-
-async function createPushSender(env, options) {
-  if (options.pushSender) return { pushSender: options.pushSender, pushConfigured: true };
-  const projectId = typeof env.FCM_PROJECT_ID === 'string' ? env.FCM_PROJECT_ID.trim() : '';
-  const credentialsPath = typeof env.GOOGLE_APPLICATION_CREDENTIALS === 'string'
-    ? env.GOOGLE_APPLICATION_CREDENTIALS.trim() : '';
-  if (!projectId && !credentialsPath) return { pushSender: undefined, pushConfigured: false };
-  if (!projectId || !credentialsPath) {
-    throw new Error('FCM_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS must be configured together');
-  }
-  try {
-    const credentialText = await readFile(credentialsPath, 'utf8');
-    const serviceAccount = JSON.parse(credentialText);
-    if (serviceAccount?.type !== 'service_account' || typeof serviceAccount.client_email !== 'string'
-      || typeof serviceAccount.private_key !== 'string' || serviceAccount.private_key.length === 0) {
-      throw new Error('invalid service account');
-    }
-    createPrivateKey(serviceAccount.private_key);
-    const [{ cert, getApps, initializeApp }, { getMessaging }] = await Promise.all([
-      import('firebase-admin/app'), import('firebase-admin/messaging'),
-    ]);
-    const appName = 'line-signaling';
-    const app = getApps().find((candidate) => candidate.name === appName)
-      ?? initializeApp({ credential: cert(serviceAccount), projectId }, appName);
-    const messaging = getMessaging(app);
-    return {
-      pushConfigured: true,
-      pushSender: (token, payload) => messaging.send({
-        token,
-        data: { kind: payload.kind, id: payload.id },
-        android: {
-          priority: 'high',
-          ttl: Math.max(1, payload.ttlMs),
-        },
-      }),
-    };
-  } catch {
-    throw new Error('FCM configuration is invalid; verify the project ID and service-account file');
-  }
-}
-
-function consumeRateLimit(map, key, { limit, windowMs, now = Date.now() }) {
-  let bucket = map.get(key);
-  if (!bucket || now - bucket.start >= windowMs) {
-    bucket = { start: now, count: 0 };
-    map.set(key, bucket);
-  }
-  bucket.count += 1;
-  return bucket.count <= limit;
 }
 
 function canonicalBase64(value) {

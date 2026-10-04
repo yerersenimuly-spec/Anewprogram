@@ -50,6 +50,7 @@ SPECS = {
     "ui_call_connected": Spec(PRIMARY, (250, 350), LOUD),
     "ui_call_ended": Spec(PRIMARY, (220, 300), LOUD),
 }
+PEAK_TOLERANCE_DB = 0.05      # 16-bit rounding
 MAX_DC = 1e-4                 # full scale
 MAX_EDGE_LSB = 1
 MAX_ROLLOFF99_HZ = 8_000
@@ -171,7 +172,7 @@ def main() -> int:
         if spec is None:
             continue
         check(spec.ms[0] <= m["ms"] <= spec.ms[1], f"{name}: duration {m['ms']:.1f} ms outside {spec.ms}")
-        check(spec.peak_db[0] <= m["peak_db"] <= spec.peak_db[1], f"{name}: peak {m['peak_db']:.2f} dBFS outside {spec.peak_db}")
+        check(spec.peak_db[0] - PEAK_TOLERANCE_DB <= m["peak_db"] <= spec.peak_db[1] + PEAK_TOLERANCE_DB, f"{name}: peak {m['peak_db']:.2f} dBFS outside {spec.peak_db}")
         check(abs(m["dc"]) <= MAX_DC, f"{name}: DC {m['dc']:.2e}")
         check(m["first"] <= MAX_EDGE_LSB and m["last"] <= MAX_EDGE_LSB, f"{name}: edges {m['first']}/{m['last']} LSB")
         check(m["clipped"] == 0, f"{name}: {m['clipped']} samples above 0.999 FS")
