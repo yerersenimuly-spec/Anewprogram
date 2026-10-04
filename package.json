@@ -1,6 +1,6 @@
 {
   "name": "line-android",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "scripts": {
     "dev": "npm --prefix server start",

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_messages">Хабарламалар</string>
+    <string name="notif_channel_calls">Кіріс қоңыраулар</string>
+    <string name="notif_channel_missed">Өткізіп алған қоңыраулар</string>
+    <string name="notif_channel_active_call">Ағымдағы қоңырау</string>
+    <string name="notif_channel_background">Фондағы байланыс</string>
+    <string name="notif_new_message">Жаңа хабарлама</string>
+    <string name="notif_hidden_message">Хабарлама жасырылған</string>
+    <string name="notif_photo">Фото</string>
+    <string name="notif_voice">Дауыстық хабарлама</string>
+    <string name="notif_file">Файл</string>
+    <string name="notif_reply">Жауап беру</string>
+    <string name="notif_mark_read">Оқылды</string>
+    <string name="notif_held_title">Жаңа байланыс</string>
+    <string name="notif_held_text">%1$s сізге жазды. Хабарламаны оқу үшін қауіпсіздік кодын салыстырыңыз.</string>
+    <string name="notif_incoming_call">Кіріс қоңырау</string>
+    <string name="notif_answer">Қабылдау</string>
+    <string name="notif_decline">Қабылдамау</string>
+    <string name="notif_missed_call">Өткізіп алған қоңырау</string>
+    <string name="notif_call">Қоңырау</string>
+    <string name="notif_group_call">Топтық қоңырау</string>
+    <string name="notif_muted">Микрофон өшірулі</string>
+    <string name="notif_in_call">Әңгіме</string>
+    <string name="notif_connecting">Қосылуда…</string>
+    <string name="notif_hangup">Аяқтау</string>
+    <string name="notif_mic">Микрофон</string>
+    <string name="notif_bg_online">Байланыста</string>
+    <string name="notif_bg_waiting_network">Желі күтілуде</string>
+    <string name="notif_bg_connecting">Қосылуда…</string>
+    <string name="notif_bg_unsent">Жіберілмеген: %1$d</string>
+    <string name="notif_you">Сіз</string>
+</resources>

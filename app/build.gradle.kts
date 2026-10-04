@@ -11,8 +11,8 @@ android {
         applicationId = "app.line"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.7.1"
+        versionCode = 9
+        versionName = "0.8.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
@@ -34,13 +34,36 @@ android {
             isUniversalApk = true
         }
     }
+    signingConfigs {
+        val keystore = System.getenv("LINE_KEYSTORE")
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("LINE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("LINE_KEY_ALIAS") ?: "line"
+                keyPassword = System.getenv("LINE_KEY_PASSWORD") ?: System.getenv("LINE_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+    }
+}
+
+// UnifiedPush brings Tink; LiveKit already ships protobuf-lite, so use Tink's Android flavour to avoid duplicate classes.
+configurations.configureEach {
+    val tink = "com.google.crypto.tink:tink-android:1.20.0"
+    resolutionStrategy {
+        force(tink)
+        dependencySubstitution { substitute(module("com.google.crypto.tink:tink")).using(module(tink)) }
     }
 }
 
 dependencies {
-    implementation("com.google.firebase:firebase-messaging:25.0.1")
+    implementation("org.unifiedpush.android:connector:3.0.10")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("io.livekit:livekit-android:2.29.0")

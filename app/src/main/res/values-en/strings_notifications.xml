@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_messages">Messages</string>
+    <string name="notif_channel_calls">Incoming calls</string>
+    <string name="notif_channel_missed">Missed calls</string>
+    <string name="notif_channel_active_call">Ongoing call</string>
+    <string name="notif_channel_background">Background connection</string>
+    <string name="notif_new_message">New message</string>
+    <string name="notif_hidden_message">Message hidden</string>
+    <string name="notif_photo">Photo</string>
+    <string name="notif_voice">Voice message</string>
+    <string name="notif_file">File</string>
+    <string name="notif_reply">Reply</string>
+    <string name="notif_mark_read">Mark as read</string>
+    <string name="notif_held_title">New contact</string>
+    <string name="notif_held_text">%1$s wrote to you. Verify the security code to read the message.</string>
+    <string name="notif_incoming_call">Incoming call</string>
+    <string name="notif_answer">Answer</string>
+    <string name="notif_decline">Decline</string>
+    <string name="notif_missed_call">Missed call</string>
+    <string name="notif_call">Call</string>
+    <string name="notif_group_call">Group call</string>
+    <string name="notif_muted">Microphone off</string>
+    <string name="notif_in_call">In call</string>
+    <string name="notif_connecting">Connecting…</string>
+    <string name="notif_hangup">End call</string>
+    <string name="notif_mic">Mute</string>
+    <string name="notif_bg_online">Connected</string>
+    <string name="notif_bg_waiting_network">Waiting for network</string>
+    <string name="notif_bg_connecting">Connecting…</string>
+    <string name="notif_bg_unsent">Not sent: %1$d</string>
+    <string name="notif_you">You</string>
+</resources>
