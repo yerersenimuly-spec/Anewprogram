@@ -13,7 +13,9 @@ import app.line.crypto.ChatMessage
 import app.line.crypto.SecureStore
 import app.line.media.CallMediaEngine
 import app.line.media.LiveCallEngine
+import app.line.core.AttachmentView
 import app.line.core.CallSummary
+import app.line.media.attachments.VoiceRecorder
 import app.line.core.DisplayName
 import app.line.core.MessageStatus
 import app.line.core.ReconnectPolicy
@@ -1140,6 +1142,31 @@ class CallService : Service() {
         if (Settings.persistent(this) && config() != null) ensureRunning(this)
         else if (state.phase == Phase.IDLE && foreground) { foreground = false; stopForeground(STOP_FOREGROUND_REMOVE) }
     }
+
+    // ---- attachments: voice messages, photos, files ---------------------------------------------------
+    // Contract used by the screens. Implemented by the media pipeline.
+
+    /** Null for plain text. Cheap and synchronous: served from memory, filled by [attachments]. */
+    fun attachment(message: app.line.crypto.ChatMessage): AttachmentView? = TODO("media pipeline")
+
+    /** Loads descriptors for the attachment messages in [messages] so that [attachment] can answer immediately. */
+    suspend fun attachments(messages: List<app.line.crypto.ChatMessage>) { TODO("media pipeline") }
+
+    /** Prepares (downscales, strips metadata), encrypts, queues and uploads. Works offline: the upload resumes later. */
+    suspend fun sendImage(peer: String, uri: android.net.Uri, caption: String? = null) { TODO("media pipeline") }
+    suspend fun sendFile(peer: String, uri: android.net.Uri) { TODO("media pipeline") }
+    suspend fun sendVoice(peer: String, recording: VoiceRecorder.Result) { TODO("media pipeline") }
+
+    /** Downloads an incoming attachment if it has not been fetched yet. Idempotent; progress shows through [attachment]. */
+    suspend fun fetchAttachment(messageId: String) { TODO("media pipeline") }
+
+    /** Decrypted copy in the cache for playing, viewing, saving or sharing. Fetches first when needed. */
+    suspend fun plainFile(messageId: String): java.io.File = TODO("media pipeline")
+
+    suspend fun markPlayed(messageId: String) { TODO("media pipeline") }
+
+    /** Failed or expired upload/download: tries again. */
+    suspend fun retryAttachment(messageId: String) { TODO("media pipeline") }
 
     companion object {
         const val ACTION_CONNECT = "app.line.action.CONNECT"

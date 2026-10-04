@@ -29,6 +29,8 @@ data class CallState(
     val chatVersion: Long = 0,
     val eventVersion: Long = 0,
     val profileVersion: Long = 0,
+    /** Bumped whenever an attachment changes stage or progress (throttled); screens re-read [CallService.attachment]. */
+    val attachmentVersion: Long = 0,
     val configReady: Boolean = false,
     val mediaReady: Boolean = false,
     val serverProtocol: Int = 0,
