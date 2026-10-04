@@ -228,6 +228,7 @@ class ProfileSheets(private val host: Host, private val onChanged: () -> Unit) {
         val service = host.service ?: return
         try {
             service.configure(code.config, host.state.highQuality)
+            service.applyPersistentSetting()
             host.toast(R.string.cp_code_applied)
         } catch (error: DifferentServerException) {
             host.toast(R.string.err_different_server)

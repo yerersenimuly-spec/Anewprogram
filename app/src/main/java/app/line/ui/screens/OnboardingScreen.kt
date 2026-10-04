@@ -177,6 +177,7 @@ class OnboardingScreen : Screen() {
         pending = null
         try {
             service.configure(code.config, state.highQuality)
+            service.applyPersistentSetting()
         } catch (error: Exception) {
             showStep(Step.CODE)
             codeField?.setError(str(if (error is DifferentServerException) R.string.err_different_server else R.string.cp_ob_code_invalid))

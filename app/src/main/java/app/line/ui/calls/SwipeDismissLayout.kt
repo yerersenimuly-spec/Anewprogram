@@ -17,7 +17,7 @@ import kotlin.math.abs
  */
 class SwipeDismissLayout(context: Context, private val content: View, private val atTop: () -> Boolean, private val onDismiss: () -> Unit) : FrameLayout(context) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
-    private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity * 4
+    private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity * 12
     private var downX = 0f
     private var downY = 0f
     private var dragging = false

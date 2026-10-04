@@ -50,9 +50,9 @@ class ProfileScreen : Screen() {
         notificationsRow = context.settingRow("bell", str(R.string.cp_row_notifications), null) { sheets.notifications() }
         group(page, notificationsRow.view, soundsRow, receiptsRow)
 
-        connectionRow = context.settingRow("globe", str(R.string.cp_row_connection), null) { sheets.connection() }
-        pushRow = context.settingRow("download", str(R.string.cp_row_push), null) { sheets.push() }
-        qualityRow = context.settingRow("speaker", str(R.string.cp_row_quality), null) { sheets.quality() }
+        connectionRow = context.settingRow("link", str(R.string.cp_row_connection), null) { sheets.connection() }
+        pushRow = context.settingRow("send", str(R.string.cp_row_push), null) { sheets.push() }
+        qualityRow = context.settingRow("waveform", str(R.string.cp_row_quality), null) { sheets.quality() }
         group(page, connectionRow.view, pushRow.view, qualityRow.view)
 
         languageRow = context.settingRow("globe", str(R.string.cp_row_language), Languages.nativeName(Locales.language(context))) { sheets.language() }
