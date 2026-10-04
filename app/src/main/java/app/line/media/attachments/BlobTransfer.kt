@@ -72,9 +72,9 @@ sealed class BlobException(val code: Int, message: String, cause: Throwable? = n
 }
 
 /**
- * Uploads and downloads encrypted blobs over HTTPS with resume support. Progress callbacks and file I/O run on
- * background threads; coroutine cancellation aborts the request and returns only after the file is released, so a
- * cancelled transfer can be restarted immediately and picks up its partial state.
+ * Uploads and downloads encrypted blobs over HTTPS with resume support. Everything runs on [Dispatchers.IO], so
+ * progress callbacks arrive on a background thread. Coroutine cancellation aborts the request and returns only after
+ * the file is released, so a cancelled transfer can be restarted immediately and picks up its partial state.
  */
 class BlobTransfer(client: OkHttpClient, private val origin: HttpUrl) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
@@ -92,21 +92,23 @@ class BlobTransfer(client: OkHttpClient, private val origin: HttpUrl) {
     suspend fun upload(ticket: Ticket, file: File, onProgress: (sent: Long, total: Long) -> Unit) {
         require(ticket.method.equals("PUT", ignoreCase = true)) { "Not an upload ticket" }
         val url = urlFor(ticket)
-        val total = file.length()
-        require(total > 0) { "Nothing to upload" }
-        var offset = ticket.offset
-        if (offset < 0 || offset > total) {
-            throw BlobException.Conflict(offset, "Server offset $offset is outside the $total byte file")
+        withContext(Dispatchers.IO) {
+            val total = file.length()
+            require(total > 0) { "Nothing to upload" }
+            var offset = ticket.offset
+            if (offset < 0 || offset > total) {
+                throw BlobException.Conflict(offset, "Server offset $offset is outside the $total byte file")
+            }
+            onProgress(offset, total)
+            var stalls = 0
+            while (offset < total) {
+                val reached = put(url, ticket, file, offset, total, onProgress)
+                stalls = if (reached <= offset) stalls + 1 else 0
+                if (stalls > MAX_STALLS) throw BlobException.Server(202, "Server stopped accepting data at $reached")
+                offset = reached
+            }
+            onProgress(total, total)
         }
-        onProgress(offset, total)
-        var stalls = 0
-        while (offset < total) {
-            val reached = put(url, ticket, file, offset, total, onProgress)
-            stalls = if (reached <= offset) stalls + 1 else 0
-            if (stalls > MAX_STALLS) throw BlobException.Server(202, "Server stopped accepting data at $reached")
-            offset = reached
-        }
-        onProgress(total, total)
     }
 
     /**
@@ -123,28 +125,30 @@ class BlobTransfer(client: OkHttpClient, private val origin: HttpUrl) {
         }
         val target = dest.absoluteFile
         val part = File(target.parentFile, target.name + PART_SUFFIX)
-        target.parentFile?.mkdirs()
-        try {
-            var restarts = 0
-            while (true) {
-                var have = part.length()
-                if (have > expectedSize) {
+        withContext(Dispatchers.IO) {
+            target.parentFile?.mkdirs()
+            try {
+                var restarts = 0
+                while (true) {
+                    var have = part.length()
+                    if (have > expectedSize) {
+                        part.delete()
+                        have = 0
+                    }
+                    if (have == expectedSize || fetch(url, ticket, part, have, expectedSize, onProgress)) break
                     part.delete()
-                    have = 0
+                    if (++restarts > MAX_RESTARTS) throw BlobException.Conflict(message = "Server cannot resume the download")
                 }
-                if (have == expectedSize || fetch(url, ticket, part, have, expectedSize, onProgress)) break
+                commit(part, target)
+            } catch (e: BlobException) {
+                if (e is BlobException.NotFound || e is BlobException.Conflict) part.delete()
+                throw e
+            } catch (e: IOException) {
                 part.delete()
-                if (++restarts > MAX_RESTARTS) throw BlobException.Conflict(message = "Server cannot resume the download")
+                throw e
             }
-            commit(part, target)
-        } catch (e: BlobException) {
-            if (e is BlobException.NotFound || e is BlobException.Conflict) part.delete()
-            throw e
-        } catch (e: IOException) {
-            part.delete()
-            throw e
+            onProgress(expectedSize, expectedSize)
         }
-        onProgress(expectedSize, expectedSize)
     }
 
     private suspend fun put(
@@ -209,14 +213,15 @@ class BlobTransfer(client: OkHttpClient, private val origin: HttpUrl) {
                 416 -> if (have > 0) return@await false else throw failure(response)
                 else -> throw failure(response)
             }
-            val length = response.body.contentLength()
+            val body = response.body ?: throw BlobException.Server(response.code, "Empty response body")
+            val length = body.contentLength()
             if (length >= 0 && length != expected - start) {
                 throw BlobException.Conflict(message = "Server sends $length bytes, ${expected - start} expected")
             }
             onProgress(start, expected)
             var received = start
             var reported = start
-            val source = response.body.source()
+            val source = body.source()
             val buffer = ByteArray(COPY_BUFFER)
             FileOutputStream(part, start > 0).use { out ->
                 while (true) {

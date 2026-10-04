@@ -96,7 +96,7 @@ function cloneEntry(entry) {
   return { number: entry.number, bundle: entry.bundle ? structuredClone(entry.bundle) : null, preKeyFloor: entry.preKeyFloor ?? -1 };
 }
 
-async function loadIdentities(dataFile, maxIdentities) {
+export async function loadIdentities(dataFile, maxIdentities) {
   let text;
   try {
     text = await readFile(dataFile, 'utf8');
@@ -186,7 +186,7 @@ function validateMailboxEnvelope(envelope, numberOwners, now, ttlMs) {
   return { ...envelope };
 }
 
-async function loadMailbox(mailboxFile, numberOwners, blockedNumbers, now, ttlMs, maxEntries, maxPerUser, maxReceipts) {
+export async function loadMailbox(mailboxFile, numberOwners, blockedNumbers, now, ttlMs, maxEntries, maxPerUser, maxReceipts) {
   let text;
   try {
     text = await readFile(mailboxFile, 'utf8');
@@ -257,7 +257,8 @@ async function loadMailbox(mailboxFile, numberOwners, blockedNumbers, now, ttlMs
   return { envelopes, receipts, dirty };
 }
 
-async function loadPushTokens(pushFile, numberOwners, blockedNumbers) {
+// Legacy FCM token store: read by check-data-compat only. This version never writes or rewrites it.
+export async function loadPushTokens(pushFile, numberOwners, blockedNumbers) {
   let text;
   try {
     text = await readFile(pushFile, 'utf8');
@@ -324,7 +325,7 @@ function validateAdminSettings(settings) {
     && Number.isSafeInteger(settings.maxParticipants) && settings.maxParticipants >= 2 && settings.maxParticipants <= 8;
 }
 
-async function loadAdminState(dataFile) {
+export async function loadAdminState(dataFile) {
   let text;
   try {
     text = await readFile(dataFile, 'utf8');
@@ -425,8 +426,12 @@ export async function createSignalingServer(options = {}) {
   const adminDataFile = resolve(options.adminDataFile ?? env.ADMIN_DATA_FILE ?? `${dataFile}.admin.json`);
   const mailboxFile = resolve(options.mailboxFile ?? env.MAILBOX_FILE ?? `${dataFile}.mailbox.json`);
   const pushTokenFile = resolve(options.pushTokenFile ?? env.PUSH_TOKEN_FILE ?? `${dataFile}.push.json`);
-  if (new Set([dataFile, adminDataFile, mailboxFile, pushTokenFile]).size !== 4) {
-    throw new Error('Identity, admin, mailbox, and push-token stores must use separate files');
+  const profileFile = resolve(options.profileFile ?? env.PROFILE_FILE ?? `${dataFile}.profiles.json`);
+  const pushEndpointFile = resolve(options.pushEndpointFile ?? env.PUSH_ENDPOINT_FILE ?? `${dataFile}.push-endpoints.json`);
+  const missedFile = resolve(options.missedFile ?? env.MISSED_FILE ?? `${dataFile}.missed.json`);
+  const blobDirectory = resolve(options.blobDir ?? env.BLOB_DIR ?? `${dataFile}.blobs`);
+  if (new Set([dataFile, adminDataFile, mailboxFile, pushTokenFile, profileFile, pushEndpointFile, missedFile, blobDirectory]).size !== 8) {
+    throw new Error('Identity, admin, mailbox, legacy push-token, profile, push-endpoint, missed-call, and blob stores must use separate paths');
   }
   const adminPasswordHash = parseAdminPasswordHash(env.ADMIN_PASSWORD_HASH);
   const adminSessionMs = options.adminSessionMs ?? 5 * 60_000;
@@ -456,6 +461,17 @@ export async function createSignalingServer(options = {}) {
     || !Number.isSafeInteger(inboxSyncWindowMs) || inboxSyncWindowMs < 1_000 || inboxSyncWindowMs > 60_000) {
     throw new Error('Invalid mailbox limits');
   }
+  const callResumeGraceMs = readIntegerSetting('CALL_RESUME_GRACE_MS', options.callResumeGraceMs ?? env.CALL_RESUME_GRACE_MS,
+    DEFAULT_CALL_RESUME_GRACE_MS, 0, MAX_CALL_RESUME_GRACE_MS);
+  const pushCoalesceMs = readIntegerSetting('pushCoalesceMs', options.pushCoalesceMs, DEFAULT_PUSH_COALESCE_MS, 0, 60_000);
+  const blobMaxBytes = readIntegerSetting('BLOB_MAX_BYTES', options.blobMaxBytes ?? env.BLOB_MAX_BYTES, 26 * MEBIBYTE, 1, 64 * MEBIBYTE);
+  const blobTtlMs = readIntegerSetting('BLOB_TTL_MS', options.blobTtlMs ?? env.BLOB_TTL_MS,
+    7 * 24 * 60 * 60_000, 1, 14 * 24 * 60 * 60_000);
+  const blobQuotaBytes = readIntegerSetting('BLOB_QUOTA_BYTES', options.blobQuotaBytes ?? env.BLOB_QUOTA_BYTES,
+    1024 * MEBIBYTE, 1, 1024 * 1024 * MEBIBYTE);
+  const blobSenderPendingBytes = readIntegerSetting('BLOB_SENDER_PENDING_BYTES',
+    options.blobSenderPendingBytes ?? env.BLOB_SENDER_PENDING_BYTES, 200 * MEBIBYTE, 1, 1024 * 1024 * MEBIBYTE);
+  const blobCleanupIntervalMs = readIntegerSetting('blobCleanupIntervalMs', options.blobCleanupIntervalMs, 60_000, 10, 3_600_000);
   const registrationTimeoutMs = options.registrationTimeoutMs ?? 10_000;
   const ringingTimeoutMs = options.ringingTimeoutMs ?? 45_000;
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 10_000;
@@ -486,13 +502,26 @@ export async function createSignalingServer(options = {}) {
       receipts: [...mailbox.receipts.values()],
     });
   }
-  const storedPushTokens = await loadPushTokens(pushTokenFile, numberOwners, blockedNumbers);
-  let pushTokens = storedPushTokens.tokens;
-  if (storedPushTokens.dirty) {
-    await atomicWriteJson(pushTokenFile, { version: 1, tokens: Object.fromEntries(pushTokens) });
-  }
-  const pushConfig = await createPushSender(env, options);
-  const { pushSender, pushConfigured } = pushConfig;
+  // Profiles, push endpoints and missed calls live in files that are only ever created by a write.
+  let profiles = await loadProfiles(profileFile, numberOwners);
+  let pushEndpoints = await loadPushEndpoints(pushEndpointFile, numberOwners, blockedNumbers);
+  let missedCalls = await loadMissedCalls(missedFile, numberOwners, Date.now());
+  const push = await createPushLayer({
+    allowPrivate: readBooleanSetting(env.PUSH_ALLOW_PRIVATE_ENDPOINTS),
+    apnsConfig: await readApnsConfig(env),
+    options,
+  });
+  const blobs = createBlobStore({
+    directory: blobDirectory,
+    maxBytes: blobMaxBytes,
+    ttlMs: blobTtlMs,
+    quotaBytes: blobQuotaBytes,
+    senderPendingBytes: blobSenderPendingBytes,
+    ...options.blob,
+    isBlocked: (number) => blockedNumbers.has(number),
+    chatEnabled: () => adminSettings.chatEnabled,
+  });
+  await blobs.load();
   const mediaConfig = buildMediaConfig(env);
   const tokenIssuer = options.tokenIssuer ?? (async ({ identity, room, apiKey, apiSecret }) => {
     const token = new AccessToken(apiKey, apiSecret, { identity, ttl: 120 });
@@ -515,6 +544,9 @@ export async function createSignalingServer(options = {}) {
   let storeQueue = Promise.resolve();
   let pendingStoreOperations = 0;
   const timers = new WeakMap();
+  let closing = false;
+  const profileSetLimiter = createRateLimiter({ limit: 10, windowMs: 60_000, maxEntries: maxRateLimitEntries });
+  const blobCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000, maxEntries: maxRateLimitEntries });
 
   const httpServer = createServer((request, response) => {
     if (request.method === 'GET' && (request.url === '/health' || request.url === '/')) {
@@ -522,6 +554,7 @@ export async function createSignalingServer(options = {}) {
       response.end(JSON.stringify({ status: 'ok' }));
       return;
     }
+    if (blobs.handleRequest(request, response)) return;
     response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     response.end('Not found');
   });
@@ -813,6 +846,7 @@ export async function createSignalingServer(options = {}) {
   }
 
   async function saveMailboxState(envelopes, receipts) {
+    await options.beforeMailboxWrite?.();
     const now = Date.now();
     const nextEnvelopes = new Map([...envelopes].filter(([, envelope]) => envelope.expiresAt > now));
     const nextReceipts = new Map([...receipts].filter(([, receipt]) => receipt.expiresAt > now));
@@ -827,41 +861,96 @@ export async function createSignalingServer(options = {}) {
     mailbox = { envelopes: nextEnvelopes, receipts: nextReceipts, dirty: false };
   }
 
-  async function savePushTokenState(tokens) {
-    await atomicWriteJson(pushTokenFile, { version: 1, tokens: Object.fromEntries(tokens) });
-    pushTokens = tokens;
+  async function savePushEndpointState(endpoints) {
+    await savePushEndpoints(pushEndpointFile, endpoints);
+    pushEndpoints = endpoints;
   }
 
-  function removeInvalidPushToken(number, token) {
-    const task = storeQueue.then(async () => {
-      if (pushTokens.get(number) !== token) return;
-      const next = new Map(pushTokens);
+  function enqueueStoreTask(task) {
+    const result = storeQueue.then(task);
+    storeQueue = result.catch(() => {});
+  }
+
+  // A stale endpoint stays in memory if the write fails; the next rejected push retries the removal.
+  function removeEndpoint(number, record) {
+    enqueueStoreTask(async () => {
+      if (pushEndpoints.get(number) !== record) return;
+      const next = new Map(pushEndpoints);
       next.delete(number);
-      try {
-        await savePushTokenState(next);
-      } catch {
-        // A stale token is never used for blocked or re-registered accounts.
-      }
+      await savePushEndpointState(next);
     });
-    storeQueue = task.catch(() => {});
   }
 
-  function sendPush(number, kind, id, ttlMs) {
-    const token = pushTokens.get(number);
-    if (!pushConfigured || !pushSender || !token || blockedNumbers.has(number)) return;
-    Promise.resolve().then(() => pushSender(token, { kind, id, ttlMs })).catch((failure) => {
-      if (['messaging/registration-token-not-registered', 'messaging/invalid-registration-token']
-        .includes(failure?.code)) removeInvalidPushToken(number, token);
+  function isOnline(number) {
+    const session = sessions.get(number);
+    return Boolean(session && !session.closed && session.socket.readyState === WebSocket.OPEN);
+  }
+
+  const hasUsableEndpoint = (number) => push.canSend(pushEndpoints.get(number));
+  const profileName = (number) => profiles.get(number)?.name || undefined;
+
+  function dispatchPush(number, payload, trailing) {
+    const record = pushEndpoints.get(number);
+    if (closing || !record || blockedNumbers.has(number) || !push.canSend(record)) return;
+    if (trailing && isOnline(number)) return;
+    Promise.resolve().then(() => push.send(record, payload)).catch((failure) => {
+      if (failure?.code === PUSH_ENDPOINT_GONE) removeEndpoint(number, record);
     });
+  }
+
+  const messageCoalescer = createCoalescer({ windowMs: pushCoalesceMs, dispatch: dispatchPush });
+
+  function sendPush(number, kind, id, ttlMs, reason) {
+    const payload = { kind, id, ttlMs };
+    if (kind === 'call_ended' && CALL_ENDED_PUSH_REASONS.includes(reason)) payload.reason = reason;
+    if (kind === 'message' && pushCoalesceMs > 0) messageCoalescer.push(number, payload);
+    else dispatchPush(number, payload, false);
+  }
+
+  function envelopeEvent(recipient, envelope) {
+    const event = {
+      type: 'envelope', from: envelope.from, id: envelope.id,
+      cipherType: envelope.cipherType, body: envelope.body,
+    };
+    if (recipient.protocolVersion >= 8) {
+      const name = profileName(envelope.from);
+      if (name) event.fromName = name;
+      event.sentAt = envelope.createdAt;
+    }
+    return event;
+  }
+
+  function incomingEvent(recipient, call) {
+    const event = { type: 'incoming', callId: call.id, room: call.room, members: call.members, owner: call.owner };
+    if (recipient.protocolVersion >= 8) {
+      const name = profileName(call.owner);
+      if (name) event.ownerName = name;
+    }
+    return event;
   }
 
   async function removeNumberData(number) {
     const envelopes = new Map([...mailbox.envelopes].filter(([, envelope]) => envelope.from !== number && envelope.to !== number));
     const receipts = new Map([...mailbox.receipts].filter(([, receipt]) => receipt.from !== number && receipt.to !== number));
     await saveMailboxState(envelopes, receipts);
-    const tokens = new Map(pushTokens);
-    tokens.delete(number);
-    await savePushTokenState(tokens);
+    if (pushEndpoints.has(number)) {
+      const endpoints = new Map(pushEndpoints);
+      endpoints.delete(number);
+      await savePushEndpointState(endpoints);
+    }
+    if (profiles.has(number)) {
+      const remaining = new Map(profiles);
+      remaining.delete(number);
+      await saveProfiles(profileFile, remaining);
+      profiles = remaining;
+    }
+    const remainingMissed = missedCalls.filter((call) => call.to !== number && call.from !== number);
+    if (remainingMissed.length !== missedCalls.length) {
+      await saveMissedCalls(missedFile, remainingMissed);
+      missedCalls = remainingMissed;
+    }
+    messageCoalescer.forget(number);
+    await blobs.removeNumber(number).catch(() => {});
   }
 
   function sendMailbox(session) {
@@ -869,10 +958,7 @@ export async function createSignalingServer(options = {}) {
     const now = Date.now();
     for (const envelope of mailbox.envelopes.values()) {
       if (envelope.to !== session.number || envelope.expiresAt <= now) continue;
-      const forwarded = send(session.socket, {
-        type: 'envelope', from: envelope.from, id: envelope.id,
-        cipherType: envelope.cipherType, body: envelope.body,
-      });
+      const forwarded = send(session.socket, envelopeEvent(session, envelope));
       if (!forwarded) {
         sendPush(session.number, 'message', envelope.id, MESSAGE_PUSH_TTL_MS);
         return;
@@ -905,7 +991,7 @@ export async function createSignalingServer(options = {}) {
     const callId = memberships.get(session.number);
     const call = callId && calls.get(callId);
     if (call && call.owner !== session.number && !call.joined.has(session.number)) {
-      if (!send(session.socket, { type: 'incoming', callId: call.id, room: call.room, members: call.members, owner: call.owner })) {
+      if (!send(session.socket, incomingEvent(session, call))) {
         sendPush(session.number, 'call', call.id, CALL_PUSH_TTL_MS);
       }
     }
@@ -940,33 +1026,141 @@ export async function createSignalingServer(options = {}) {
     sendInboxComplete(session);
   }
 
-  async function registerPushToken(session, value) {
-    if (!pushConfigured || !pushSender) {
-      send(session.socket, { type: 'push_registered', pushEnabled: false });
-      return;
+  async function registerPushEndpoint(session, message) {
+    const parsed = parsePushRegistration(message, { allowPrivate: push.allowPrivate, apnsEnabled: push.apnsEnabled });
+    if (parsed.error) return error(session.socket, parsed.error);
+    if (!sameEndpoint(pushEndpoints.get(session.number), parsed.record)) {
+      const endpoints = new Map(pushEndpoints);
+      endpoints.set(session.number, { ...parsed.record, registeredAt: Date.now() });
+      await savePushEndpointState(endpoints);
     }
-    if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') < MIN_PUSH_TOKEN_BYTES
-      || Buffer.byteLength(value, 'utf8') > MAX_PUSH_TOKEN_BYTES || /[\u0000-\u0020\u007f]/.test(value)) {
-      return error(session.socket, 'invalid_push_token');
+    send(session.socket, { type: 'push_registered', pushEnabled: true, provider: parsed.record.provider });
+  }
+
+  async function unregisterPushEndpoint(session) {
+    if (pushEndpoints.has(session.number)) {
+      const endpoints = new Map(pushEndpoints);
+      endpoints.delete(session.number);
+      await savePushEndpointState(endpoints);
     }
-    const tokens = new Map(pushTokens);
-    tokens.set(session.number, value);
-    await savePushTokenState(tokens);
-    send(session.socket, { type: 'push_registered', pushEnabled: true });
+    send(session.socket, { type: 'push_unregistered' });
+  }
+
+  async function setProfile(session, name) {
+    if (blockedNumbers.has(session.number)) return error(session.socket, 'blocked');
+    if (!adminSettings.chatEnabled) return error(session.socket, 'chat_disabled');
+    const current = profiles.get(session.number);
+    if (name === (current?.name ?? '')) {
+      return send(session.socket, { type: 'profile_updated', name, updatedAt: name === '' ? 0 : current.updatedAt });
+    }
+    const updatedAt = Math.max(Date.now(), (current?.updatedAt ?? 0) + 1);
+    const next = new Map(profiles);
+    next.set(session.number, { name, updatedAt, proto: Math.max(current?.proto ?? 0, session.protocolVersion) });
+    await saveProfiles(profileFile, next);
+    profiles = next;
+    return send(session.socket, { type: 'profile_updated', name, updatedAt: name === '' ? 0 : updatedAt });
+  }
+
+  // Best effort: a failed write is retried at the account's next v8 registration.
+  async function recordProtocolVersion(session) {
+    const current = profiles.get(session.number);
+    const proto = Math.max(current?.proto ?? 0, session.protocolVersion);
+    if (current?.proto === proto) return;
+    const next = new Map(profiles);
+    next.set(session.number, { name: current?.name ?? '', updatedAt: current?.updatedAt ?? 0, proto });
+    try {
+      await saveProfiles(profileFile, next);
+      profiles = next;
+    } catch {
+      // Nothing to report: the version is recorded again next time.
+    }
+  }
+
+  function listProfiles(session, message) {
+    const listed = [];
+    for (const number of message.numbers) {
+      const profile = profiles.get(number);
+      if (profile && numberOwners.has(number) && !blockedNumbers.has(number)) {
+        listed.push({ number, name: profile.name, updatedAt: profile.updatedAt, proto: profile.proto });
+      }
+    }
+    send(session.socket, { type: 'profiles', requestId: message.requestId, profiles: listed });
+  }
+
+  async function acknowledgeMissedCall(session, callId) {
+    const remaining = missedCalls.filter((call) => !(call.to === session.number && call.callId === callId));
+    if (remaining.length === missedCalls.length) return;
+    await saveMissedCalls(missedFile, remaining);
+    missedCalls = remaining;
+  }
+
+  function sendMissedCalls(session) {
+    const now = Date.now();
+    for (const call of missedCalls) {
+      if (call.to !== session.number || call.at <= now - MISSED_CALL_TTL_MS || blockedNumbers.has(call.from)) continue;
+      const event = { type: 'missed_call', callId: call.callId, from: call.from, at: call.at };
+      const name = profileName(call.from);
+      if (name) event.fromName = name;
+      send(session.socket, event);
+    }
+  }
+
+  // Members who never joined a call that went unanswered are recorded as missed (not the decliner).
+  function recordMissedCalls(call, reason) {
+    if (closing || !call.announced || !['timeout', 'disconnected', 'left', 'declined'].includes(reason)) return;
+    const at = Date.now();
+    const records = call.members
+      .filter((number) => number !== call.owner && !call.joined.has(number) && number !== call.declinedBy
+        && !blockedNumbers.has(number))
+      .map((number) => ({ to: number, from: call.owner, callId: call.id, at, reason }));
+    if (records.length === 0) return;
+    enqueueStoreTask(async () => {
+      const next = pruneMissedCalls([...missedCalls, ...records], Date.now());
+      await saveMissedCalls(missedFile, next);
+      missedCalls = next;
+    });
+  }
+
+  function startCallGrace(call, number) {
+    if (call.grace.has(number)) return;
+    const timer = setTimeout(() => {
+      call.grace.delete(number);
+      endCall(call, 'disconnected');
+    }, callResumeGraceMs);
+    timer.unref?.();
+    call.grace.set(number, timer);
+  }
+
+  // A member of an active call is back within the grace period: keep the call, or end it as before
+  // when the new session cannot resume.
+  function takeCallResume(number, protocolVersion) {
+    const callId = memberships.get(number);
+    const call = callId && calls.get(callId);
+    if (!call || !call.grace.has(number)) return undefined;
+    clearTimeout(call.grace.get(number));
+    call.grace.delete(number);
+    if (protocolVersion < 8) {
+      endCall(call, 'disconnected');
+      return undefined;
+    }
+    return call;
   }
 
   function endCall(call, reason) {
     if (calls.get(call.id) !== call) return;
     calls.delete(call.id);
     clearTimeout(call.timer);
+    for (const timer of call.grace.values()) clearTimeout(timer);
+    call.grace.clear();
     appendAdminEvent('call_ended');
+    recordMissedCalls(call, reason);
     for (const number of call.members) {
       if (memberships.get(number) === call.id) memberships.delete(number);
       const member = sessions.get(number);
       const notified = call.announced && member
         ? send(member.socket, { type: 'ended', callId: call.id, reason }) : false;
       if (call.announced && !notified && number !== call.owner) {
-        sendPush(number, 'call_ended', call.id, CALL_PUSH_TTL_MS);
+        sendPush(number, 'call_ended', call.id, CALL_PUSH_TTL_MS, reason);
       }
     }
     if (call.roomProvisioned) deleteRoomBestEffort(call.room);
@@ -988,7 +1182,10 @@ export async function createSignalingServer(options = {}) {
     if (sessions.get(session.number) === session) sessions.delete(session.number);
     const callId = memberships.get(session.number);
     const call = callId && calls.get(callId);
-    if (call && (call.owner === session.number || call.joined.has(session.number))) endCall(call, 'disconnected');
+    if (call && (call.owner === session.number || call.joined.has(session.number))) {
+      if (session.protocolVersion >= 8 && callResumeGraceMs > 0 && call.announced && !closing) startCallGrace(call, session.number);
+      else endCall(call, 'disconnected');
+    }
   }
 
   function takeRegistrationSlot(ip) {
@@ -1060,10 +1257,11 @@ export async function createSignalingServer(options = {}) {
       cleanupSession(previous);
     }
     session.number = number;
-    session.protocolVersion = protocolVersion;
+    session.protocolVersion = Math.min(protocolVersion, PROTOCOL_VERSION);
     sessions.set(number, session);
     clearTimeout(timers.get(session));
     appendAdminEvent('registration');
+    const resumedCall = takeCallResume(number, session.protocolVersion);
     const registered = {
       type: 'registered', number, mediaReady: Boolean(mediaConfig),
       callsEnabled: adminSettings.callsEnabled,
@@ -1071,9 +1269,27 @@ export async function createSignalingServer(options = {}) {
       registrationEnabled: adminSettings.registrationEnabled,
       maxParticipants: adminSettings.maxParticipants,
     };
-    if (protocolVersion >= 7) registered.pushEnabled = Boolean(pushConfigured && pushTokens.has(number));
+    if (session.protocolVersion >= 7) registered.pushEnabled = hasUsableEndpoint(number);
+    if (session.protocolVersion >= 8) {
+      registered.protocol = PROTOCOL_VERSION;
+      registered.serverTime = Date.now();
+      registered.features = [...FEATURES];
+      registered.pushProviders = [...push.providers];
+      const name = profileName(number);
+      if (name) registered.name = name;
+    }
     send(session.socket, registered);
+    if (session.protocolVersion >= 8) {
+      sendMissedCalls(session);
+      if (resumedCall) {
+        send(session.socket, {
+          type: 'call_resume', callId: resumedCall.id, room: resumedCall.room, members: resumedCall.members,
+          owner: resumedCall.owner, joined: [...resumedCall.joined],
+        });
+      }
+    }
     resumeSession(session);
+    if (session.protocolVersion >= 8) await recordProtocolVersion(session);
   }
 
   async function updateKeys(session, bundle) {
@@ -1099,9 +1315,14 @@ export async function createSignalingServer(options = {}) {
     const hash = numberOwners.get(message.to);
     const target = hash && identities.get(hash);
     if (!target?.bundle) return error(session.socket, 'not_found', { requestId: message.requestId });
+    const reply = (bundle) => {
+      const bundleMessage = { type: 'bundle', peer: message.to, requestId: message.requestId, bundle };
+      const profile = session.protocolVersion >= 8 ? profiles.get(message.to) : undefined;
+      if (profile) bundleMessage.profile = { name: profile.name, updatedAt: profile.updatedAt, proto: profile.proto };
+      return send(session.socket, bundleMessage);
+    };
     if (message.consumePreKey === false) {
-      return send(session.socket, { type: 'bundle', peer: message.to, requestId: message.requestId,
-        bundle: { ...structuredClone(target.bundle), preKeys: [] } });
+      return reply({ ...structuredClone(target.bundle), preKeys: [] });
     }
     if (target.bundle.preKeys.length === 0) return error(session.socket, 'prekeys_exhausted', { requestId: message.requestId });
 
@@ -1111,7 +1332,7 @@ export async function createSignalingServer(options = {}) {
     next.set(hash, { number: target.number, bundle: { ...structuredClone(target.bundle), preKeys: remaining }, preKeyFloor: preKey.id });
     await saveIdentities(dataFile, next);
     replaceIdentities(next);
-    send(session.socket, { type: 'bundle', peer: message.to, requestId: message.requestId, bundle });
+    reply(bundle);
   }
 
   async function relayEnvelope(session, message) {
@@ -1151,19 +1372,18 @@ export async function createSignalingServer(options = {}) {
       createdAt: now, expiresAt: now + mailboxTtlMs,
     };
     envelopes.set(key, envelope);
-    await saveMailboxState(envelopes, receipts);
-
-    send(session.socket, { type: session.protocolVersion >= 7 ? 'queued' : 'sent', id: message.id });
     const recipient = sessions.get(message.to);
+    const silent = message.silent === true;
+    // Forward before the disk write; the sender's acknowledgement below still means "durably queued".
+    // A failed write is reported to the sender, and the recipient deduplicates a retry by message ID.
     if (recipient && !recipient.closed && recipient.socket.readyState === WebSocket.OPEN) {
-      const forwarded = send(recipient.socket, {
-        type: 'envelope', from: envelope.from, id: envelope.id,
-        cipherType: envelope.cipherType, body: envelope.body,
-      });
-      if (!forwarded) sendPush(message.to, 'message', message.id, MESSAGE_PUSH_TTL_MS);
-    } else {
+      const forwarded = send(recipient.socket, envelopeEvent(recipient, envelope));
+      if (!forwarded && !silent) sendPush(message.to, 'message', message.id, MESSAGE_PUSH_TTL_MS);
+    } else if (!silent) {
       sendPush(message.to, 'message', message.id, MESSAGE_PUSH_TTL_MS);
     }
+    await saveMailboxState(envelopes, receipts);
+    send(session.socket, { type: session.protocolVersion >= 7 ? 'queued' : 'sent', id: message.id });
   }
 
   async function acknowledgeDelivery(session, id) {
@@ -1203,7 +1423,7 @@ export async function createSignalingServer(options = {}) {
       const target = sessions.get(number);
       if (memberships.has(number)) return error(session.socket, 'busy', { to: number });
       if ((!target || target.closed || target.socket.readyState !== WebSocket.OPEN)
-        && (!pushConfigured || !pushTokens.has(number))) return error(session.socket, 'offline', { to: number });
+        && !hasUsableEndpoint(number)) return error(session.socket, 'offline', { to: number });
     }
     if (!mediaConfig) return error(session.socket, 'media_not_configured');
 
@@ -1212,7 +1432,7 @@ export async function createSignalingServer(options = {}) {
     const roster = [session.number, ...members];
     const call = {
       id: callId, room, owner: session.number, members: roster, joined: new Set(), timer: undefined,
-      announced: false, roomProvisioned: false,
+      announced: false, roomProvisioned: false, grace: new Map(), declinedBy: undefined,
     };
     calls.set(callId, call);
     for (const number of roster) memberships.set(number, callId);
@@ -1238,7 +1458,7 @@ export async function createSignalingServer(options = {}) {
         if (blockedNumbers.has(number) || memberships.get(number) !== callId) return false;
         const member = sessions.get(number);
         if (member && !member.closed && member.socket.readyState === WebSocket.OPEN) return true;
-        return number !== call.owner && pushConfigured && pushTokens.has(number);
+        return number !== call.owner && hasUsableEndpoint(number);
       });
     if (!stillActive) {
       if (calls.get(callId) === call) endCall(call, 'disconnected');
@@ -1252,7 +1472,7 @@ export async function createSignalingServer(options = {}) {
     for (const number of members) {
       const target = sessions.get(number);
       if (target && !target.closed && target.socket.readyState === WebSocket.OPEN) {
-        if (!send(target.socket, { type: 'incoming', ...invitation })) {
+        if (!send(target.socket, incomingEvent(target, call))) {
           sendPush(number, 'call', call.id, CALL_PUSH_TTL_MS);
         }
       } else {
@@ -1297,6 +1517,43 @@ export async function createSignalingServer(options = {}) {
     }
   }
 
+  const validRequestId = (value) => typeof value === 'string' && REQUEST_ID_PATTERN.test(value);
+
+  async function createBlob(session, message) {
+    const reply = (code) => error(session.socket, code, { requestId: message.requestId });
+    if (!adminSettings.chatEnabled) return reply('chat_disabled');
+    if (blockedNumbers.has(session.number)) return reply('blocked');
+    if (!blobCreateLimiter.take(session.number)) return reply('rate_limited');
+    if (message.size > blobMaxBytes) return reply('blob_too_large');
+    if (blockedNumbers.has(message.to)) return reply('blocked');
+    if (!numberOwners.has(message.to)) return reply('not_found');
+    const id = message.id.toLowerCase();
+    const result = await blobs.create({ owner: session.number, to: message.to, id, size: message.size });
+    if (result.error) return reply(result.error);
+    send(session.socket, {
+      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'PUT', path: `/blob/${id}`,
+      token: result.token, expiresAt: result.expiresAt, offset: result.offset,
+    });
+  }
+
+  function getBlob(session, message) {
+    const reply = (code) => error(session.socket, code, { requestId: message.requestId });
+    if (!adminSettings.chatEnabled) return reply('chat_disabled');
+    const id = message.id.toLowerCase();
+    const result = blobs.download({ number: session.number, id });
+    if (result.error) return reply(result.error);
+    send(session.socket, {
+      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'GET', path: `/blob/${id}`,
+      token: result.token, expiresAt: result.expiresAt, size: result.size, from: result.from,
+    });
+  }
+
+  function acknowledgeBlob(session, message) {
+    blobs.acknowledge({ number: session.number, id: message.id.toLowerCase() }).then((result) => {
+      if (result.error) error(session.socket, result.error, { id: message.id });
+    }, () => error(session.socket, 'storage_unavailable', { id: message.id }));
+  }
+
   function handleMessage(session, message) {
     if (message.type === 'admin_login' || message.type === 'admin') return handleAdminMessage(session, message);
     if (!session.number) {
@@ -1330,7 +1587,9 @@ export async function createSignalingServer(options = {}) {
           (code) => error(session.socket, code, { requestId: message.requestId }),
         );
       case 'envelope':
-        if (!hasOnlyKeys(message, ['type', 'to', 'id', 'cipherType', 'body']) || typeof message.to !== 'string'
+        if (!hasOnlyKeys(message, session.protocolVersion >= 8
+          ? ['type', 'to', 'id', 'cipherType', 'body', 'silent'] : ['type', 'to', 'id', 'cipherType', 'body'])
+          || (message.silent !== undefined && typeof message.silent !== 'boolean') || typeof message.to !== 'string'
           || !NUMBER_PATTERN.test(message.to) || typeof message.id !== 'string' || !UUID_PATTERN.test(message.id)
           || ![2, 3].includes(message.cipherType) || !validBase64(message.body, MAX_ENVELOPE_BYTES)) {
           return error(session.socket, 'invalid_message', typeof message.id === 'string' ? { id: message.id } : {});
@@ -1345,9 +1604,68 @@ export async function createSignalingServer(options = {}) {
         return queueStoreOperation(session, () => acknowledgeDelivery(session, message.id),
           (code) => error(session.socket, code, { id: message.id }));
       case 'push_register':
-        if (session.protocolVersion < 7 || !hasOnlyKeys(message, ['type', 'token'])) return error(session.socket, 'invalid_message');
-        return queueStoreOperation(session, () => registerPushToken(session, message.token),
+        if (session.protocolVersion < 7) return error(session.socket, 'invalid_message');
+        if (session.protocolVersion >= 8 && message.provider !== undefined) {
+          if (typeof message.provider !== 'string') return error(session.socket, 'invalid_message');
+          return queueStoreOperation(session, () => registerPushEndpoint(session, message), (code) => error(session.socket, code));
+        }
+        // Firebase tokens are no longer accepted: report that push is not available for this registration.
+        if (!hasOnlyKeys(message, ['type', 'token'])) return error(session.socket, 'invalid_message');
+        return void send(session.socket, { type: 'push_registered', pushEnabled: false });
+      case 'push_unregister':
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, ['type'])) return error(session.socket, 'invalid_message');
+        return queueStoreOperation(session, () => unregisterPushEndpoint(session), (code) => error(session.socket, code));
+      case 'profile_set': {
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, ['type', 'name']) || typeof message.name !== 'string') {
+          return error(session.socket, 'invalid_message');
+        }
+        if (!profileSetLimiter.take(session.number)) return error(session.socket, 'rate_limited');
+        const name = normalizeProfileName(message.name);
+        if (name === undefined) return error(session.socket, 'invalid_profile');
+        return queueStoreOperation(session, () => setProfile(session, name), (code) => error(session.socket, code));
+      }
+      case 'profile_get': {
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, ['type', 'requestId', 'numbers'])
+          || typeof message.requestId !== 'string' || !UUID_PATTERN.test(message.requestId)
+          || !Array.isArray(message.numbers) || message.numbers.length > 32
+          || message.numbers.some((number) => typeof number !== 'string' || !NUMBER_PATTERN.test(number))
+          || new Set(message.numbers).size !== message.numbers.length) {
+          return error(session.socket, 'invalid_message');
+        }
+        session.profileGetRates ??= new Map();
+        if (!consumeRateLimit(session.profileGetRates, 'profile_get', { limit: 30, windowMs: 60_000 })) {
+          return error(session.socket, 'rate_limited', { requestId: message.requestId });
+        }
+        if (!adminSettings.chatEnabled) return error(session.socket, 'chat_disabled', { requestId: message.requestId });
+        return listProfiles(session, message);
+      }
+      case 'missed_ack':
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, ['type', 'callId'])
+          || typeof message.callId !== 'string' || !UUID_PATTERN.test(message.callId)) {
+          return error(session.socket, 'invalid_message');
+        }
+        return queueStoreOperation(session, () => acknowledgeMissedCall(session, message.callId.toLowerCase()),
           (code) => error(session.socket, code));
+      case 'blob_create':
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, BLOB_REQUEST_SHAPES.blob_create) || !validRequestId(message.requestId)
+          || typeof message.id !== 'string' || !UUID_PATTERN.test(message.id)
+          || typeof message.to !== 'string' || !NUMBER_PATTERN.test(message.to)
+          || !Number.isSafeInteger(message.size) || message.size < 1) {
+          return error(session.socket, 'invalid_message', validRequestId(message.requestId) ? { requestId: message.requestId } : {});
+        }
+        return void createBlob(session, message).catch(() => error(session.socket, 'storage_unavailable', { requestId: message.requestId }));
+      case 'blob_get':
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, BLOB_REQUEST_SHAPES.blob_get) || !validRequestId(message.requestId)
+          || typeof message.id !== 'string' || !UUID_PATTERN.test(message.id)) {
+          return error(session.socket, 'invalid_message', validRequestId(message.requestId) ? { requestId: message.requestId } : {});
+        }
+        return getBlob(session, message);
+      case 'blob_ack':
+        if (session.protocolVersion < 8 || !hasOnlyKeys(message, ['type', 'id'])
+          || typeof message.id !== 'string' || !UUID_PATTERN.test(message.id)) {
+          return error(session.socket, 'invalid_message');
+        }
+        return acknowledgeBlob(session, message);
       case 'inbox_sync':
         if (session.protocolVersion < 7 || !hasOnlyKeys(message, ['type'])) return error(session.socket, 'invalid_message');
         return queueStoreOperation(session, () => syncInbox(session),
@@ -1367,6 +1685,7 @@ export async function createSignalingServer(options = {}) {
         }
         const call = calls.get(message.callId);
         if (!call || !call.members.includes(session.number)) return error(session.socket, 'unauthorized', { callId: message.callId });
+        if (message.type === 'decline_call') call.declinedBy = session.number;
         endCall(call, message.type === 'leave_call' ? 'left' : 'declined');
         return;
       }
@@ -1472,6 +1791,9 @@ export async function createSignalingServer(options = {}) {
   }, Math.min(mailboxTtlMs, 60_000));
   mailboxCleanup.unref?.();
 
+  const blobCleanup = setInterval(() => { blobs.sweep().catch(() => {}); }, blobCleanupIntervalMs);
+  blobCleanup.unref?.();
+
   return {
     httpServer,
     wss,
@@ -1486,13 +1808,18 @@ export async function createSignalingServer(options = {}) {
       return httpServer.address();
     },
     async close() {
+      closing = true;
       clearInterval(heartbeat);
       clearInterval(mailboxCleanup);
+      clearInterval(blobCleanup);
+      messageCoalescer.close();
       for (const call of [...calls.values()]) endCall(call, 'disconnected');
+      push.close();
       for (const socket of wss.clients) socket.terminate();
       await new Promise((resolveClose) => {
         if (!httpServer.listening) return resolveClose();
         httpServer.close(() => resolveClose());
+        httpServer.closeAllConnections?.();
       });
       await new Promise((resolveClose) => wss.close(() => resolveClose()));
     },

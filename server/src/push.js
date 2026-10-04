@@ -524,6 +524,7 @@ export function createApnsSender({
 
 // At most one dispatch per key per window: the first goes out immediately, anything arriving
 // while the window is open is merged into a single trailing dispatch carrying the latest value.
+// dispatch(key, value, trailing) receives trailing=true for the merged one.
 export function createCoalescer({ windowMs, dispatch }) {
   const states = new Map();
   function release(key) {
@@ -537,7 +538,7 @@ export function createCoalescer({ windowMs, dispatch }) {
     state.pending = undefined;
     state.timer = setTimeout(() => release(key), windowMs);
     state.timer.unref?.();
-    dispatch(key, pending);
+    dispatch(key, pending, true);
   }
   return {
     push(key, value) {
@@ -549,7 +550,7 @@ export function createCoalescer({ windowMs, dispatch }) {
       const created = { pending: undefined, timer: setTimeout(() => release(key), windowMs) };
       created.timer.unref?.();
       states.set(key, created);
-      dispatch(key, value);
+      dispatch(key, value, false);
     },
     forget(key) {
       const state = states.get(key);

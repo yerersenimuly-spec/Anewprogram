@@ -395,8 +395,8 @@ test('version-7 registration and authenticated inbox sync deliver calls, receipt
   const member = await openSocket(resource);
   await register(owner, token('7'), bundle(76, 0), 7);
   const peerInfo = await register(peer, token('8'), bundle(77, 0), 7);
-  const memberInfo = await register(member, token('9'), bundle(78, 0), 7);
-  await sendRequest(member, { type: 'push_register', token: 'fcm-registration-token-0123456789abcdef' },
+  const memberInfo = await register(member, token('9'), bundle(78, 0), 8);
+  await sendRequest(member, { type: 'push_register', provider: 'unifiedpush', endpoint: 'https://push.example.test/up/member-9' },
     (item) => item.type === 'push_registered');
 
   const deliveredToPeer = waitFor(peer, (item) => item.type === 'envelope' && item.id === uuid(7_601));
@@ -442,8 +442,8 @@ test('version-7 registration and authenticated inbox sync deliver calls, receipt
   await syncComplete;
   const syncEvents = registrationEvents.slice(syncStart);
   assert.deepEqual(syncEvents.map((item) => item.type), ['incoming', 'delivered', 'envelope', 'inbox_complete']);
-  assert.equal(JSON.parse(await readFile(join(resource.directory, 'identities.json.push.json'), 'utf8'))
-    .tokens[memberInfo.number], 'fcm-registration-token-0123456789abcdef');
+  assert.equal(JSON.parse(await readFile(join(resource.directory, 'identities.json.push-endpoints.json'), 'utf8'))
+    .endpoints[memberInfo.number].endpoint, 'https://push.example.test/up/member-9');
 
   assert.deepEqual(await sendRequest(reconnected, { type: 'inbox_sync' },
     (item) => item.type === 'error'), { type: 'error', code: 'rate_limited' });
@@ -495,30 +495,35 @@ test('push is optional, account-bound, and sends only generic offline wake-up da
   }, (item) => item.type === 'error'), { type: 'error', code: 'invalid_message' });
   await assert.rejects(readFile(join(disabled.directory, 'identities.json.push.json')),
     (failure) => failure.code === 'ENOENT');
+  await assert.rejects(readFile(join(disabled.directory, 'identities.json.push-endpoints.json')),
+    (failure) => failure.code === 'ENOENT');
+  assert.deepEqual(await sendRequest(disabledUser, {
+    type: 'push_register', provider: 'unifiedpush', endpoint: 'https://push.example.test/up/v7',
+  }, (item) => item.type === 'error'), { type: 'error', code: 'invalid_message' });
 
   const pushes = [];
-  const enabled = await setup({ pushSender: async (pushToken, payload) => { pushes.push({ pushToken, payload }); } });
+  const enabled = await setup({ pushSender: async (record, payload) => { pushes.push({ record, payload }); } });
   const sender = await openSocket(enabled);
   const recipient = await openSocket(enabled);
-  await register(sender, token('4'), bundle(61, 0), 7);
-  const recipientInfo = await register(recipient, token('5'), bundle(62, 0), 7);
-  const tooShortPushToken = 'x'.repeat(24);
-  const registeredPush = await sendRequest(recipient, {
-    type: 'push_register', token: tooShortPushToken,
+  await register(sender, token('4'), bundle(61, 0), 8);
+  const recipientInfo = await register(recipient, token('5'), bundle(62, 0), 8);
+  const insecureEndpoint = await sendRequest(recipient, {
+    type: 'push_register', provider: 'unifiedpush', endpoint: 'http://push.example.test/up/insecure',
   }, (item) => item.type === 'error');
-  assert.deepEqual(registeredPush, { type: 'error', code: 'invalid_push_token' });
-  const validPushToken = 'x'.repeat(25);
+  assert.deepEqual(insecureEndpoint, { type: 'error', code: 'invalid_push_endpoint' });
   const validPush = await sendRequest(recipient, {
-    type: 'push_register', token: validPushToken,
+    type: 'push_register', provider: 'unifiedpush', endpoint: 'https://push.example.test/up/first',
   }, (item) => item.type === 'push_registered');
-  assert.deepEqual(validPush, { type: 'push_registered', pushEnabled: true });
+  assert.deepEqual(validPush, { type: 'push_registered', pushEnabled: true, provider: 'unifiedpush' });
   const registeredPushAgain = await sendRequest(recipient, {
-    type: 'push_register', token: 'fcm-device-token-0123456789abcdef',
+    type: 'push_register', provider: 'unifiedpush', endpoint: 'https://push.example.test/up/second',
   }, (item) => item.type === 'push_registered');
-  assert.deepEqual(registeredPushAgain, { type: 'push_registered', pushEnabled: true });
-  const pushFile = join(enabled.directory, 'identities.json.push.json');
+  assert.deepEqual(registeredPushAgain, { type: 'push_registered', pushEnabled: true, provider: 'unifiedpush' });
+  const pushFile = join(enabled.directory, 'identities.json.push-endpoints.json');
   assert.equal((await stat(pushFile)).mode & 0o777, 0o600);
-  assert.equal(JSON.parse(await readFile(pushFile, 'utf8')).tokens[recipientInfo.number], 'fcm-device-token-0123456789abcdef');
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(pushFile, 'utf8')).endpoints), [recipientInfo.number]);
+  assert.equal(JSON.parse(await readFile(pushFile, 'utf8')).endpoints[recipientInfo.number].endpoint,
+    'https://push.example.test/up/second');
   await closeSocket(recipient);
 
   const message = {
