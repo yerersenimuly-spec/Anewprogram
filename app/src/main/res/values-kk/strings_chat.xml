@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cv_load_failed">Жүктелмеді</string>
+    <string name="cv_retry">Қайталау</string>
+    <string name="cv_held_title_many">Жаңа байланыстар</string>
+    <string name="cv_held_body_many">Салыстыру керек: %1$d</string>
+    <string name="cv_unread">Оқылмаған: %1$d</string>
+    <string name="cv_voice_speed">Ойнату жылдамдығы</string>
+    <string name="cv_voice_lock">Жазуды бекіту</string>
+    <string name="cv_voice_busy">Микрофон бос емес</string>
+    <string name="cv_media_unreadable">Файлды оқу мүмкін болмады</string>
+    <string name="cv_media_memory">Сурет тым үлкен</string>
+    <string name="cv_media_expired">Файл енді қолжетімсіз</string>
+    <string name="cv_caption_hint">Сипаттама</string>
+    <string name="cv_search_chat_hint">Чаттан іздеу</string>
+    <string name="cv_clear">Тазарту</string>
+    <string name="cv_contact_profile_name">Профиль аты</string>
+    <string name="cv_msg_share">Бөлісу</string>
+</resources>

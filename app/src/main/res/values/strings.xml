@@ -24,13 +24,13 @@
     <string name="status_read">Прочитано</string>
     <string name="status_failed">Не отправлено</string>
 
-    <string name="err_no_connection">Нет соединения. Проверьте подключение.</string>
+    <string name="err_no_connection">Нет соединения. Проверьте интернет.</string>
     <string name="err_number_not_found">Номер не найден</string>
     <string name="err_blocked">Номер заблокирован</string>
     <string name="err_chat_disabled">Сообщения временно отключены</string>
     <string name="err_try_later">Сервер занят. Повторите позже.</string>
     <string name="err_verify_first">Сначала сверьте код безопасности</string>
-    <string name="err_generic">Не удалось выполнить действие</string>
+    <string name="err_generic">Не удалось выполнить. Повторите попытку.</string>
     <string name="err_identity_changed">Ключ собеседника изменился. Сверьте код безопасности.</string>
     <string name="err_different_server">Этот номер привязан к другому серверу</string>
     <string name="err_mic_required">Разрешите доступ к микрофону в настройках</string>
@@ -52,13 +52,13 @@
     <string name="notice_server_message_rejected">Сообщение сервера отклонено</string>
     <string name="notice_operation_failed">Действие не выполнено. Проверьте сеть и код безопасности.</string>
 
-    <string name="chats_empty_title">Пока нет чатов</string>
-    <string name="chats_empty_body">Введите номер собеседника, чтобы начать переписку.</string>
+    <string name="chats_empty_title">Чатов пока нет</string>
+    <string name="chats_empty_body">Начните с номера собеседника</string>
     <string name="chats_new">Новый чат</string>
     <string name="chats_search">Поиск</string>
     <string name="chats_you_prefix">Вы: %1$s</string>
     <string name="held_title">Новый контакт</string>
-    <string name="held_body">Новое сообщение от %1$s. Сверьте код безопасности, чтобы прочитать его.</string>
+    <string name="held_body">Сообщение от %1$s</string>
     <string name="held_action">Сверить</string>
     <string name="chat_open">Открыть чат</string>
     <string name="chat_delete_history">Очистить историю</string>
@@ -71,7 +71,7 @@
     <string name="newchat_title">Новый чат</string>
     <string name="newchat_number_hint">Номер собеседника</string>
     <string name="newchat_name_hint">Имя (необязательно)</string>
-    <string name="newchat_open">Открыть</string>
+    <string name="newchat_open">Продолжить</string>
 
     <string name="conv_message_hint">Сообщение</string>
     <string name="conv_verify_banner">Сверьте код безопасности, чтобы начать переписку</string>
@@ -87,16 +87,16 @@
     <string name="conv_attach">Прикрепить</string>
     <string name="conv_send">Отправить</string>
     <string name="conv_voice">Голосовое сообщение</string>
-    <string name="conv_empty_title">Начните переписку</string>
-    <string name="conv_empty_body">Сообщения защищены сквозным шифрованием.</string>
+    <string name="conv_empty_title">Сообщений пока нет</string>
+    <string name="conv_empty_body">Переписка защищена сквозным шифрованием</string>
     <string name="conv_scroll_down">К последним сообщениям</string>
     <string name="conv_rename_title">Имя контакта</string>
-    <string name="conv_rename_hint">Имя в вашем списке</string>
+    <string name="conv_rename_hint">Имя, видно только вам</string>
 
     <string name="msg_copy">Копировать</string>
-    <string name="msg_retry">Отправить повторно</string>
+    <string name="msg_retry">Повторить отправку</string>
     <string name="msg_save">Сохранить</string>
-    <string name="msg_delete">Удалить на этом устройстве</string>
+    <string name="msg_delete">Удалить</string>
     <string name="msg_delete_title">Удалить сообщение?</string>
     <string name="msg_delete_body">Сообщение удалится только на этом устройстве.</string>
     <string name="msg_open">Открыть</string>
@@ -108,12 +108,12 @@
     <string name="attach_send_file">Отправить файл</string>
     <string name="attach_send">Отправить</string>
 
-    <string name="voice_hold_hint">Удерживайте кнопку, чтобы записать</string>
+    <string name="voice_hold_hint">Удерживайте, чтобы записать</string>
     <string name="voice_slide_cancel">Влево — отмена</string>
     <string name="voice_recording">Запись</string>
     <string name="voice_cancel">Отмена</string>
     <string name="voice_send">Отправить</string>
-    <string name="voice_too_short">Слишком короткая запись</string>
+    <string name="voice_too_short">Слишком коротко</string>
     <string name="voice_play">Воспроизвести</string>
     <string name="voice_pause">Пауза</string>
 
@@ -122,10 +122,10 @@
     <string name="media_failed">Не удалось загрузить</string>
     <string name="media_retry">Повторить</string>
     <string name="media_too_large">Файл больше 25 МБ</string>
-    <string name="media_peer_old">Собеседник пользуется старой версией Line и не получит файл. Попросите обновить приложение.</string>
-    <string name="media_unsupported_image">Не удалось открыть изображение</string>
+    <string name="media_peer_old">У собеседника старая версия Line, файл не дойдёт. Попросите обновить приложение.</string>
+    <string name="media_unsupported_image">Формат не поддерживается</string>
     <string name="media_saved">Сохранено</string>
-    <string name="media_no_app">Нет приложения для открытия файла</string>
+    <string name="media_no_app">Нет подходящего приложения</string>
     <string name="size_b">%1$d Б</string>
     <string name="size_kb">%1$s КБ</string>
     <string name="size_mb">%1$s МБ</string>
@@ -134,9 +134,8 @@
     <string name="contact_number">Номер</string>
     <string name="contact_verified">Проверен</string>
     <string name="contact_not_verified">Не проверен</string>
-    <string name="contact_verify">Сверить код безопасности</string>
     <string name="contact_security_title">Код безопасности</string>
-    <string name="contact_security_body">Сравните этот код с кодом собеседника лично или по другому каналу связи. Если коды совпадают, переписка защищена.</string>
+    <string name="contact_security_body">Сравните код с кодом собеседника — лично или по другому каналу связи.</string>
     <string name="contact_match">Коды совпадают</string>
     <string name="contact_later">Позже</string>
 
