@@ -13,7 +13,7 @@
     <string name="notif_reply">Reply</string>
     <string name="notif_mark_read">Mark as read</string>
     <string name="notif_held_title">New contact</string>
-    <string name="notif_held_text">%1$s wrote to you. Verify the security code to read the message.</string>
+    <string name="notif_held_text">%1$s sent you a message. Verify the security code to read it.</string>
     <string name="notif_incoming_call">Incoming call</string>
     <string name="notif_answer">Answer</string>
     <string name="notif_decline">Decline</string>

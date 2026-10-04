@@ -24,8 +24,8 @@
     <string name="status_read">Прочитано</string>
     <string name="status_failed">Не отправлено</string>
 
-    <string name="err_no_connection">Нет соединения. Проверьте интернет.</string>
-    <string name="err_number_not_found">Такого номера нет</string>
+    <string name="err_no_connection">Нет соединения. Проверьте подключение.</string>
+    <string name="err_number_not_found">Номер не найден</string>
     <string name="err_blocked">Номер заблокирован</string>
     <string name="err_chat_disabled">Сообщения временно отключены</string>
     <string name="err_try_later">Сервер занят. Повторите позже.</string>
@@ -39,18 +39,18 @@
 
     <string name="notice_call_declined">Звонок отклонён</string>
     <string name="notice_call_no_answer">Нет ответа</string>
-    <string name="notice_call_network_lost">Звонок прервался: нет сети</string>
+    <string name="notice_call_network_lost">Звонок прерван: нет сети</string>
     <string name="notice_call_media_lost">Связь потеряна</string>
     <string name="notice_call_media_failed">Не удалось установить защищённое соединение</string>
     <string name="notice_call_secure_failed">Сбой защищённого соединения. Сверьте коды безопасности.</string>
-    <string name="notice_call_protocol">Ошибка протокола звонка</string>
-    <string name="notice_call_unavailable">Абонент недоступен</string>
+    <string name="notice_call_protocol">Звонок прерван: техническая ошибка</string>
+    <string name="notice_call_unavailable">Собеседник недоступен</string>
     <string name="notice_calls_disabled">Звонки отключены администратором</string>
     <string name="notice_mic_required">Нет доступа к микрофону</string>
     <string name="notice_replaced">Аккаунт открыт на другом устройстве</string>
     <string name="notice_message_rejected">Сообщение отклонено</string>
     <string name="notice_server_message_rejected">Сообщение сервера отклонено</string>
-    <string name="notice_operation_failed">Не удалось выполнить. Проверьте сеть и код безопасности.</string>
+    <string name="notice_operation_failed">Действие не выполнено. Проверьте сеть и код безопасности.</string>
 
     <string name="chats_empty_title">Пока нет чатов</string>
     <string name="chats_empty_body">Введите номер собеседника, чтобы начать переписку.</string>
@@ -58,7 +58,7 @@
     <string name="chats_search">Поиск</string>
     <string name="chats_you_prefix">Вы: %1$s</string>
     <string name="held_title">Новый контакт</string>
-    <string name="held_body">%1$s написал(а) вам. Сверьте код безопасности, чтобы прочитать сообщение.</string>
+    <string name="held_body">Новое сообщение от %1$s. Сверьте код безопасности, чтобы прочитать его.</string>
     <string name="held_action">Сверить</string>
     <string name="chat_open">Открыть чат</string>
     <string name="chat_delete_history">Очистить историю</string>
@@ -98,7 +98,7 @@
     <string name="msg_save">Сохранить</string>
     <string name="msg_delete">Удалить на этом устройстве</string>
     <string name="msg_delete_title">Удалить сообщение?</string>
-    <string name="msg_delete_body">Оно удалится только на этом устройстве.</string>
+    <string name="msg_delete_body">Сообщение удалится только на этом устройстве.</string>
     <string name="msg_open">Открыть</string>
 
     <string name="attach_photo">Фото</string>
@@ -113,7 +113,7 @@
     <string name="voice_recording">Запись</string>
     <string name="voice_cancel">Отмена</string>
     <string name="voice_send">Отправить</string>
-    <string name="voice_too_short">Слишком короткое сообщение</string>
+    <string name="voice_too_short">Слишком короткая запись</string>
     <string name="voice_play">Воспроизвести</string>
     <string name="voice_pause">Пауза</string>
 

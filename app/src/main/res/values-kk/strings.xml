@@ -25,7 +25,7 @@
     <string name="status_failed">Жіберілмеді</string>
 
     <string name="err_no_connection">Байланыс жоқ. Интернетті тексеріңіз.</string>
-    <string name="err_number_not_found">Мұндай нөмір жоқ</string>
+    <string name="err_number_not_found">Нөмір табылмады</string>
     <string name="err_blocked">Нөмір бұғатталған</string>
     <string name="err_chat_disabled">Хабарламалар уақытша өшірулі</string>
     <string name="err_try_later">Сервер бос емес. Кейінірек қайталаңыз.</string>
@@ -43,14 +43,14 @@
     <string name="notice_call_media_lost">Байланыс жоғалды</string>
     <string name="notice_call_media_failed">Қорғалған байланысты орнату мүмкін болмады</string>
     <string name="notice_call_secure_failed">Қорғалған байланыс бұзылды. Қауіпсіздік кодтарын салыстырыңыз.</string>
-    <string name="notice_call_protocol">Қоңырау протоколының қатесі</string>
-    <string name="notice_call_unavailable">Абонент қолжетімсіз</string>
+    <string name="notice_call_protocol">Қоңырау техникалық ақауға байланысты үзілді</string>
+    <string name="notice_call_unavailable">Әңгімелесуші қолжетімсіз</string>
     <string name="notice_calls_disabled">Қоңыраулар әкімшімен өшірілген</string>
     <string name="notice_mic_required">Микрофонға рұқсат жоқ</string>
     <string name="notice_replaced">Аккаунт басқа құрылғыда ашылған</string>
     <string name="notice_message_rejected">Хабарлама қабылданбады</string>
     <string name="notice_server_message_rejected">Сервер хабарламасы қабылданбады</string>
-    <string name="notice_operation_failed">Орындалмады. Желі мен қауіпсіздік кодын тексеріңіз.</string>
+    <string name="notice_operation_failed">Әрекет орындалмады. Желі мен қауіпсіздік кодын тексеріңіз.</string>
 
     <string name="chats_empty_title">Әзірге чат жоқ</string>
     <string name="chats_empty_body">Әңгімені бастау үшін әңгімелесушінің нөмірін енгізіңіз.</string>
@@ -74,13 +74,13 @@
     <string name="newchat_open">Ашу</string>
 
     <string name="conv_message_hint">Хабарлама</string>
-    <string name="conv_verify_banner">Бастау үшін қауіпсіздік кодын салыстырыңыз</string>
+    <string name="conv_verify_banner">Хат алмасуды бастау үшін қауіпсіздік кодын салыстырыңыз</string>
     <string name="conv_verify_action">Салыстыру</string>
     <string name="conv_menu_search">Чаттан іздеу</string>
     <string name="conv_menu_verify">Қауіпсіздік коды</string>
     <string name="conv_menu_rename">Атын өзгерту</string>
     <string name="conv_menu_clear">Тарихты тазалау</string>
-    <string name="conv_clear_title">Тарихты тазалау керек пе?</string>
+    <string name="conv_clear_title">Тарих тазалансын ба?</string>
     <string name="conv_clear_body">Хабарламалар тек осы құрылғыдан жойылады. Әңгімелесушіде сақталады.</string>
     <string name="conv_clear_confirm">Тазалау</string>
     <string name="conv_call">Қоңырау шалу</string>
@@ -88,17 +88,17 @@
     <string name="conv_send">Жіберу</string>
     <string name="conv_voice">Дауыстық хабарлама</string>
     <string name="conv_empty_title">Әңгімені бастаңыз</string>
-    <string name="conv_empty_body">Хабарламалар соңына дейін шифрланған.</string>
+    <string name="conv_empty_body">Хабарламалар ұштан ұшқа шифрланған.</string>
     <string name="conv_scroll_down">Соңғы хабарламалар</string>
     <string name="conv_rename_title">Байланыс аты</string>
-    <string name="conv_rename_hint">Тізімдегі атыңыз</string>
+    <string name="conv_rename_hint">Тізімдегі аты</string>
 
     <string name="msg_copy">Көшіру</string>
     <string name="msg_retry">Қайта жіберу</string>
     <string name="msg_save">Сақтау</string>
     <string name="msg_delete">Осы құрылғыдан жою</string>
-    <string name="msg_delete_title">Хабарламаны жою керек пе?</string>
-    <string name="msg_delete_body">Ол тек осы құрылғыдан жойылады.</string>
+    <string name="msg_delete_title">Хабарлама жойылсын ба?</string>
+    <string name="msg_delete_body">Хабарлама тек осы құрылғыдан жойылады.</string>
     <string name="msg_open">Ашу</string>
 
     <string name="attach_photo">Фото</string>
@@ -113,7 +113,7 @@
     <string name="voice_recording">Жазылуда</string>
     <string name="voice_cancel">Бас тарту</string>
     <string name="voice_send">Жіберу</string>
-    <string name="voice_too_short">Хабарлама тым қысқа</string>
+    <string name="voice_too_short">Жазба тым қысқа</string>
     <string name="voice_play">Ойнату</string>
     <string name="voice_pause">Кідірту</string>
 

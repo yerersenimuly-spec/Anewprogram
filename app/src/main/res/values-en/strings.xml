@@ -24,18 +24,18 @@
     <string name="status_read">Read</string>
     <string name="status_failed">Not sent</string>
 
-    <string name="err_no_connection">No connection. Check your internet.</string>
-    <string name="err_number_not_found">This number doesn’t exist</string>
+    <string name="err_no_connection">No connection. Check your network.</string>
+    <string name="err_number_not_found">Number not found</string>
     <string name="err_blocked">This number is blocked</string>
     <string name="err_chat_disabled">Messaging is temporarily disabled</string>
     <string name="err_try_later">The server is busy. Try again later.</string>
     <string name="err_verify_first">Verify the security code first</string>
-    <string name="err_generic">Something went wrong</string>
+    <string name="err_generic">Couldn’t complete the action</string>
     <string name="err_identity_changed">The contact’s key has changed. Verify the security code.</string>
     <string name="err_different_server">This identity belongs to another server</string>
     <string name="err_mic_required">Allow microphone access in Settings</string>
-    <string name="err_own_number">That’s your own number. Enter someone else’s.</string>
-    <string name="err_number_format">A number has 8 digits</string>
+    <string name="err_own_number">That’s your own number. Enter a contact’s number.</string>
+    <string name="err_number_format">The number must have 8 digits</string>
 
     <string name="notice_call_declined">Call declined</string>
     <string name="notice_call_no_answer">No answer</string>
@@ -43,14 +43,14 @@
     <string name="notice_call_media_lost">Connection lost</string>
     <string name="notice_call_media_failed">Couldn’t establish a secure connection</string>
     <string name="notice_call_secure_failed">Secure connection failed. Verify security codes.</string>
-    <string name="notice_call_protocol">Call protocol error</string>
+    <string name="notice_call_protocol">Call ended due to a technical error</string>
     <string name="notice_call_unavailable">Contact unavailable</string>
     <string name="notice_calls_disabled">Calls are disabled by the administrator</string>
     <string name="notice_mic_required">No microphone access</string>
     <string name="notice_replaced">Account opened on another device</string>
     <string name="notice_message_rejected">Message rejected</string>
     <string name="notice_server_message_rejected">Server message rejected</string>
-    <string name="notice_operation_failed">Failed. Check your network and security code.</string>
+    <string name="notice_operation_failed">Action failed. Check your network and security code.</string>
 
     <string name="chats_empty_title">No chats yet</string>
     <string name="chats_empty_body">Enter a contact’s number to start a conversation.</string>
@@ -58,7 +58,7 @@
     <string name="chats_search">Search</string>
     <string name="chats_you_prefix">You: %1$s</string>
     <string name="held_title">New contact</string>
-    <string name="held_body">%1$s wrote to you. Verify the security code to read the message.</string>
+    <string name="held_body">%1$s sent you a message. Verify the security code to read it.</string>
     <string name="held_action">Verify</string>
     <string name="chat_open">Open chat</string>
     <string name="chat_delete_history">Clear history</string>
@@ -74,7 +74,7 @@
     <string name="newchat_open">Open</string>
 
     <string name="conv_message_hint">Message</string>
-    <string name="conv_verify_banner">Verify the security code to start chatting</string>
+    <string name="conv_verify_banner">Verify the security code to start messaging</string>
     <string name="conv_verify_action">Verify</string>
     <string name="conv_menu_search">Search in chat</string>
     <string name="conv_menu_verify">Security code</string>
@@ -98,7 +98,7 @@
     <string name="msg_save">Save</string>
     <string name="msg_delete">Delete on this device</string>
     <string name="msg_delete_title">Delete message?</string>
-    <string name="msg_delete_body">It will be removed on this device only.</string>
+    <string name="msg_delete_body">The message will be removed on this device only.</string>
     <string name="msg_open">Open</string>
 
     <string name="attach_photo">Photo</string>
@@ -113,7 +113,7 @@
     <string name="voice_recording">Recording</string>
     <string name="voice_cancel">Cancel</string>
     <string name="voice_send">Send</string>
-    <string name="voice_too_short">Message too short</string>
+    <string name="voice_too_short">Recording too short</string>
     <string name="voice_play">Play</string>
     <string name="voice_pause">Pause</string>
 

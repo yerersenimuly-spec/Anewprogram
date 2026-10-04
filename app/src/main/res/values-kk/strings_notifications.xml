@@ -11,7 +11,7 @@
     <string name="notif_voice">Дауыстық хабарлама</string>
     <string name="notif_file">Файл</string>
     <string name="notif_reply">Жауап беру</string>
-    <string name="notif_mark_read">Оқылды</string>
+    <string name="notif_mark_read">Оқылды деп белгілеу</string>
     <string name="notif_held_title">Жаңа байланыс</string>
     <string name="notif_held_text">%1$s сізге жазды. Хабарламаны оқу үшін қауіпсіздік кодын салыстырыңыз.</string>
     <string name="notif_incoming_call">Кіріс қоңырау</string>
@@ -21,10 +21,10 @@
     <string name="notif_call">Қоңырау</string>
     <string name="notif_group_call">Топтық қоңырау</string>
     <string name="notif_muted">Микрофон өшірулі</string>
-    <string name="notif_in_call">Әңгіме</string>
+    <string name="notif_in_call">Қоңырау жүріп жатыр</string>
     <string name="notif_connecting">Қосылуда…</string>
-    <string name="notif_hangup">Аяқтау</string>
-    <string name="notif_mic">Микрофон</string>
+    <string name="notif_hangup">Қоңырауды аяқтау</string>
+    <string name="notif_mic">Микрофонды өшіру</string>
     <string name="notif_bg_online">Байланыста</string>
     <string name="notif_bg_waiting_network">Желі күтілуде</string>
     <string name="notif_bg_connecting">Қосылуда…</string>
