@@ -15,7 +15,7 @@
 
     <string name="banner_waiting_network">Желі күтілуде</string>
     <string name="banner_connecting">Қосылуда…</string>
-    <string name="banner_unsent">Жіберілмеген: %1$d</string>
+    <string name="banner_unsent">Жіберілуді күтуде: %1$d</string>
     <string name="return_to_call">Қоңырау жүріп жатыр · оралу</string>
 
     <string name="status_pending">Жіберуді күтуде</string>
@@ -43,14 +43,14 @@
     <string name="notice_call_media_lost">Байланыс жоғалды</string>
     <string name="notice_call_media_failed">Қорғалған байланысты орнату мүмкін болмады</string>
     <string name="notice_call_secure_failed">Қорғалған байланыс бұзылды. Қауіпсіздік кодтарын салыстырыңыз.</string>
-    <string name="notice_call_protocol">Қоңырау техникалық ақауға байланысты үзілді</string>
-    <string name="notice_call_unavailable">Әңгімелесуші қолжетімсіз</string>
+    <string name="notice_call_protocol">Қоңырау сәтсіз аяқталды. Қайталап көріңіз.</string>
+    <string name="notice_call_unavailable">Абонент қолжетімсіз</string>
     <string name="notice_calls_disabled">Қоңыраулар әкімшімен өшірілген</string>
-    <string name="notice_mic_required">Микрофонға рұқсат жоқ</string>
+    <string name="notice_mic_required">Микрофонға рұқсат жоқ. Баптаулардан рұқсат беріңіз.</string>
     <string name="notice_replaced">Аккаунт басқа құрылғыда ашылған</string>
-    <string name="notice_message_rejected">Хабарлама қабылданбады</string>
-    <string name="notice_server_message_rejected">Сервер хабарламасы қабылданбады</string>
-    <string name="notice_operation_failed">Әрекет орындалмады. Желі мен қауіпсіздік кодын тексеріңіз.</string>
+    <string name="notice_message_rejected">Хабар қабылданбады</string>
+    <string name="notice_server_message_rejected">Сервер жауабы дұрыс емес</string>
+    <string name="notice_operation_failed">Орындалмады. Желі мен қауіпсіздік кодын тексеріңіз.</string>
 
     <string name="chats_empty_title">Чаттар әлі жоқ</string>
     <string name="chats_empty_body">Әңгімелесушінің нөмірінен бастаңыз</string>
