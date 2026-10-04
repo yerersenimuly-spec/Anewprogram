@@ -89,7 +89,8 @@ class RecentsView(context: Context, private val callbacks: Callbacks) : FrameLay
         private val dateFormat by lazy { dayFormat(false) }
         private val dateWithYear by lazy { dayFormat(true) }
         private val date = Date()
-        private val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        private val calendar = java.util.Calendar.getInstance()
+        private val thisYear = calendar.get(java.util.Calendar.YEAR)
 
         private fun dayFormat(year: Boolean) = java.text.SimpleDateFormat(
             DateFormat.getBestDateTimePattern(Locale.getDefault(), if (year) "dMMMMy" else "dMMMM"), Locale.getDefault(),
@@ -138,7 +139,8 @@ class RecentsView(context: Context, private val callbacks: Callbacks) : FrameLay
             DayLabel.YESTERDAY -> context.getString(R.string.cp_yesterday)
             DayLabel.OTHER -> {
                 date.time = item.timestamp
-                val year = java.util.Calendar.getInstance().apply { time = date }.get(java.util.Calendar.YEAR)
+                calendar.time = date
+                val year = calendar.get(java.util.Calendar.YEAR)
                 (if (year == thisYear) dateFormat else dateWithYear).format(date)
             }
         }.uppercase(Locale.getDefault())
@@ -187,15 +189,15 @@ class RecentRowView(context: Context) : LinearLayout(context) {
 
     fun bind(row: RecentRow, callbacks: RecentsView.Callbacks, clock: String) {
         val negative = CallOutcomes.isNegative(row.kind)
-        val labels = row.peers.map(callbacks::nameOf)
-        val name = labels.joinToString(", ") { it.text }
+        val first = callbacks.nameOf(row.peers.firstOrNull().orEmpty())
+        val name = if (row.group) row.peers.joinToString(", ") { callbacks.nameOf(it).text } else first.text
         title.text = if (row.count > 1) "$name (${row.count})" else name
         title.setTextColor(context.color(if (negative) R.color.negative else R.color.text_primary))
         if (row.group) {
             avatar.visibility = GONE; groupBadge.visibility = VISIBLE
         } else {
             groupBadge.visibility = GONE; avatar.visibility = VISIBLE
-            avatar.bind(row.peers.firstOrNull().orEmpty(), labels.firstOrNull()?.text?.takeIf { labels.first().named })
+            avatar.bind(row.peers.firstOrNull().orEmpty(), first.text.takeIf { first.named })
         }
         val icon = when {
             row.kind == OutcomeKind.MISSED -> "phone_missed"
@@ -206,7 +208,7 @@ class RecentRowView(context: Context) : LinearLayout(context) {
         direction.setTint(if (negative) R.color.negative else R.color.text_tertiary)
         detail.text = detailText(row)
         time.text = clock
-        contentDescription = listOf(title.text, detail.text, clock).joinToString(", ")
+        contentDescription = "${title.text}, ${detail.text}, $clock"
         setOnClickListener { callbacks.open(row) }
         setOnLongClickListener { callbacks.more(row); true }
     }

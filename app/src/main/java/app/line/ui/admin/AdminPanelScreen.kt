@@ -31,6 +31,8 @@ class AdminPanelScreen : Screen() {
     private var busy = false
     private var tick: Job? = null
     private var numberText = ""
+    private var applyButton: View? = null
+    private var maxLabel: TextView? = null
 
     private lateinit var bar: TopBar
     private lateinit var body: LinearLayout
@@ -61,11 +63,13 @@ class AdminPanelScreen : Screen() {
         if (busy) return
         loadFailed = false
         if (status == null) renderLoading()
+        val first = status == null
         exec { service ->
             val parsed = AdminStatus.parse(service.adminCommand("status"))
             status = parsed
             edited = parsed.settings
             render()
+            if (first) Motion.enter(body, 140)
         }
     }
 
@@ -123,7 +127,6 @@ class AdminPanelScreen : Screen() {
         calls(data)
         diagnostics(data)
         connection()
-        Motion.enter(body, 140)
     }
 
     private fun section(title: Int) = body.addView(context.sectionHeader(str(title)))
@@ -161,14 +164,16 @@ class AdminPanelScreen : Screen() {
     private fun rules(data: AdminStatus, settings: AdminSettings) {
         section(R.string.cp_admin_rules)
         fun toggle(title: Int, value: Boolean, change: (AdminSettings, Boolean) -> AdminSettings) =
-            context.switchRow(null, str(title), null, value) { edited = change(edited ?: data.settings, it); render() }.first
+            context.switchRow(null, str(title), null, value) { edited = change(edited ?: data.settings, it); updateApply(data) }.first
+        val count = context.label(settings.maxParticipants.toString(), TextStyle.SUBTITLE).apply { gravity = Gravity.CENTER; minWidth = context.dp(28) }
+        maxLabel = count
         val stepper = ListRow(context).apply {
             title.text = str(R.string.cp_admin_max_participants)
             leading(null)
             trailing(context.row {
-                addView(context.iconButton("chevron_down", str(R.string.cp_admin_fewer), sizeDp = 40, iconDp = 22) { adjust(data, -1) })
-                addView(context.label(settings.maxParticipants.toString(), TextStyle.SUBTITLE).apply { gravity = Gravity.CENTER; minWidth = context.dp(28) })
-                addView(context.iconButton("plus", str(R.string.cp_admin_more), sizeDp = 40, iconDp = 22) { adjust(data, +1) })
+                addView(context.iconButton("chevron_left", str(R.string.cp_admin_fewer), sizeDp = 40, iconDp = 22) { adjust(data, -1) })
+                addView(count)
+                addView(context.iconButton("chevron_right", str(R.string.cp_admin_more), sizeDp = 40, iconDp = 22) { adjust(data, +1) })
             })
         }
         cardOf(
@@ -177,10 +182,15 @@ class AdminPanelScreen : Screen() {
             toggle(R.string.cp_admin_registration, settings.registrationEnabled) { s, v -> s.copy(registrationEnabled = v) },
             stepper,
         )
-        val dirty = AdminRules.dirty(data.settings, settings)
-        val apply = context.primaryButton(str(R.string.cp_admin_apply)) { confirmRules(data, settings) }
-        apply.isEnabled = dirty; apply.alpha = if (dirty) 1f else 0.4f
+        val apply = context.primaryButton(str(R.string.cp_admin_apply)) { confirmRules(data, edited ?: data.settings) }
+        applyButton = apply
         body.addView(apply, LinearLayout.LayoutParams(MATCH, WRAP).apply { marginStart = context.dp(16); marginEnd = context.dp(16); topMargin = context.dp(12) })
+        updateApply(data)
+    }
+
+    private fun updateApply(data: AdminStatus) {
+        val dirty = AdminRules.dirty(data.settings, edited ?: data.settings)
+        applyButton?.let { it.isEnabled = dirty; it.alpha = if (dirty) 1f else 0.4f }
     }
 
     private fun adjust(data: AdminStatus, delta: Int) {
@@ -188,7 +198,8 @@ class AdminPanelScreen : Screen() {
         val next = (current.maxParticipants + delta).coerceIn(AdminSettings.MIN_PARTICIPANTS, AdminSettings.MAX_PARTICIPANTS)
         if (next == current.maxParticipants) return
         edited = current.copy(maxParticipants = next)
-        render()
+        maxLabel?.text = next.toString()
+        updateApply(data)
     }
 
     private fun confirmRules(data: AdminStatus, settings: AdminSettings) {

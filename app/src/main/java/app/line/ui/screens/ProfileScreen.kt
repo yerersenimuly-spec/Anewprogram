@@ -18,6 +18,7 @@ class ProfileScreen : Screen() {
     override val tab = "profile"
 
     private lateinit var sheets: ProfileSheets
+    private var shownKey: Any? = null
     private lateinit var avatar: AvatarView
     private lateinit var nameView: TextView
     private lateinit var numberView: TextView
@@ -143,10 +144,22 @@ class ProfileScreen : Screen() {
         aboutRow.setValue(sheets.versionName())
     }
 
-    override fun onShown() { bind(); sheets.refresh() }
+    override fun onShown() { shownKey = keyOf(host.state); bind(); sheets.refresh() }
+
+    /** Only what this screen shows; most state updates (message counters, presence) do not concern it. */
+    private data class Key(
+        val number: String, val name: String, val link: app.line.Link, val online: Boolean, val configured: Boolean,
+        val pushActive: Boolean, val highQuality: Boolean, val protocol: Int, val phase: app.line.Phase,
+    )
+
+    private fun keyOf(state: CallState) = Key(state.number, state.ownName, state.link, state.online, state.configReady,
+        state.pushActive, state.highQuality, state.serverProtocol, state.phase)
 
     override fun onState(old: CallState, new: CallState) {
         if (!isBuilt) return
+        val key = keyOf(new)
+        if (key == shownKey) return
+        shownKey = key
         bind()
         sheets.refresh()
     }

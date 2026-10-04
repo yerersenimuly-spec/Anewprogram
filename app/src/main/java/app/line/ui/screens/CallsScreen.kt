@@ -327,7 +327,9 @@ class CallsScreen : Screen(), RecentsView.Callbacks {
         if (!isBuilt) return
         if (old.phase == app.line.Phase.IDLE && new.phase != app.line.Phase.IDLE) { buffer = DialBuffer(); pendingMessage = null }
         if (old.number != new.number) renderOwn()
-        renderDial()
+        if (old.phase != new.phase || old.configReady != new.configReady || old.callsEnabled != new.callsEnabled ||
+            old.online != new.online || old.mediaReady != new.mediaReady || old.maxParticipants != new.maxParticipants ||
+            old.number != new.number) renderDial()
         if (segments.selected == 1 && new.eventVersion != loadedEventVersion) refreshRecentsIfStale()
         if (new.profileVersion != seenProfileVersion) {
             seenProfileVersion = new.profileVersion
