@@ -13,9 +13,36 @@ import app.line.crypto.ChatMessage
 import app.line.crypto.SecureStore
 import app.line.media.CallMediaEngine
 import app.line.media.LiveCallEngine
+import app.line.core.AttachmentCrypto
+import app.line.core.AttachmentPayload
+import app.line.core.AttachmentTooLarge
+import app.line.core.AttachmentUnreadable
 import app.line.core.AttachmentView
+import app.line.core.AttachmentViews
+import app.line.core.AutoFetchPolicy
 import app.line.core.CallSummary
+import app.line.core.MediaDraft
+import app.line.core.MediaIntake
+import app.line.core.MediaLimits
+import app.line.core.MediaNotSupportedByPeer
+import app.line.core.MediaPreview
+import app.line.core.MediaUnavailable
+import app.line.core.OutboxFull
+import app.line.core.StoredStage
+import app.line.core.TransferStage
+import app.line.media.attachments.AttachmentEngine
+import app.line.media.attachments.AttachmentFiles
+import app.line.media.attachments.AttachmentGateway
+import app.line.media.attachments.AttachmentPrepareException
+import app.line.media.attachments.BlobException
+import app.line.media.attachments.BlobTransfer
+import app.line.media.attachments.ImageProcessor
+import app.line.media.attachments.Ticket
+import app.line.media.attachments.TicketRefused
+import app.line.media.attachments.TicketRequest
 import app.line.media.attachments.VoiceRecorder
+import app.line.media.attachments.toSendException
+import app.line.ui.Locales
 import app.line.core.DisplayName
 import app.line.core.MessageStatus
 import app.line.core.ReconnectPolicy
@@ -32,6 +59,10 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FileInputStream
+import java.io.FileNotFoundException
+import java.io.IOException
+import java.io.InputStream
 import java.security.SecureRandom
 import java.util.UUID
 
@@ -63,6 +94,8 @@ class CallService : Service() {
     private var registrationHandshake: RegistrationHandshake? = null
     private var retryJob: Job? = null
     private val lookups = mutableMapOf<String, CompletableDeferred<JSONObject>>()
+    private val blobRequests = mutableMapOf<String, CompletableDeferred<JSONObject>>()
+    private val pendingBlobAcks = LinkedHashSet<String>()
     private val adminRequests = mutableMapOf<String, CompletableDeferred<JSONObject>>()
     private var adminExpiresAt = 0L
     private var adminEpoch = 0
@@ -154,8 +187,9 @@ class CallService : Service() {
         work {
             secure.await()
             loadProfileCache()
-            update(state.copy(pending = db { it.pendingMessageCount() }))
+            refreshPending()
             if (generation == initialGeneration) connect()
+            bestEffort { media().sweep() }
         }
     }
 
@@ -277,6 +311,22 @@ class CallService : Service() {
     private fun cancelLookups(reason: String) {
         lookups.values.forEach { it.completeExceptionally(IllegalStateException(reason)) }
         lookups.clear()
+        blobRequests.values.forEach { it.completeExceptionally(BlobException.Network(message = reason)) }
+        blobRequests.clear()
+    }
+
+    private suspend fun bestEffort(block: suspend () -> Unit) {
+        try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+    }
+
+    private suspend fun refreshChat() {
+        val pending = db { it.pendingMessageCount() }
+        update(state.copy(chatVersion = state.chatVersion + 1, pending = pending))
+    }
+
+    private suspend fun refreshPending() {
+        val pending = db { it.pendingMessageCount() }
+        update(state.copy(pending = pending))
     }
 
     private fun launchCallOperation(phase: Phase, expectedCallId: String, block: suspend (Int, String) -> Unit) {
@@ -448,14 +498,20 @@ class CallService : Service() {
 
     fun clearMessageNotifications(peer: String) = AppNotifications.cancelConversation(this, peer)
     suspend fun deleteMessage(id: String) {
+        val blobs = db { it.attachmentBlobs(id) }
+        blobs.forEach { media().cancel(it.messageId) }
         db { it.deleteMessage(id) }
         inFlight.remove(id)
-        update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+        blobs.forEach { media().discard(it.messageId, it.blobId, acknowledge = !it.outgoing) }
+        refreshChat()
     }
     suspend fun clearConversation(peer: String) {
+        val blobs = db { it.attachmentBlobsOfPeer(peer) }
+        blobs.forEach { media().cancel(it.messageId) }
         db { it.clearConversation(peer) }
+        blobs.forEach { media().discard(it.messageId, it.blobId, acknowledge = !it.outgoing) }
         AppNotifications.cancelConversation(this, peer)
-        update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+        refreshChat()
     }
 
     /** A lookup is only needed to create the first session; later messages are encrypted offline. */
@@ -480,7 +536,7 @@ class CallService : Service() {
         val id = UUID.randomUUID().toString()
         val payload = Receipts.chat(id, text).toString().toByteArray()
         db { it.encryptAndQueue(number, id, payload, text) }
-        update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+        refreshChat()
         flushOutbox()
     }
 
@@ -493,7 +549,10 @@ class CallService : Service() {
     /** The conversation the user is looking at: incoming messages there are read immediately and not notified. */
     fun setViewing(peer: String?) {
         viewingPeer = peer
-        if (peer != null) work { markRead(peer) }
+        if (peer != null) work {
+            markRead(peer)
+            bestEffort { media().autoFetchConversation(peer, AutoFetchPolicy.Context(chatOpen = true, metered = isMetered())) }
+        }
     }
 
     suspend fun markRead(peer: String) {
@@ -505,8 +564,12 @@ class CallService : Service() {
     }
 
     suspend fun retryMessage(id: String) {
+        if (db { it.attachment(id) } != null) retryAttachment(id) else retryEnvelope(id)
+    }
+
+    private suspend fun retryEnvelope(id: String) {
         if (db { it.retryMessage(id) }) {
-            update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+            refreshChat()
             flushOutbox()
         }
     }
@@ -560,7 +623,7 @@ class CallService : Service() {
         inFlight.remove(id)
         if (inFlight.isEmpty()) ackWatchdog?.cancel()
         db { it.acknowledgeQueued(id) }
-        update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+        refreshChat()
     }
 
     private suspend fun rejectEnvelope(id: String, code: String) {
@@ -574,7 +637,7 @@ class CallService : Service() {
                     if (!changed) it.removeOutbox(id)
                     changed
                 }
-                if (failed) update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+                if (failed) refreshChat()
             }
         }
     }
@@ -604,6 +667,10 @@ class CallService : Service() {
                 flushOutbox()
                 registerPush()
                 work { syncOwnProfile(info); refreshPeerProfiles() }
+                if (info.supportsAttachments) {
+                    pendingBlobAcks.toList().forEach { acknowledgeBlob(it) }
+                    work { media().onOnline { peer -> AutoFetchPolicy.Context(viewingPeer == peer, isMetered()) } }
+                }
                 watchCallResume()
             }
             "push_registered" -> {
@@ -646,6 +713,7 @@ class CallService : Service() {
                 if (!state.callsEnabled && state.phase != Phase.IDLE) finish(Notice.CALLS_DISABLED, false, "failed")
             }
             "bundle" -> lookups.remove(message.getString("requestId"))?.complete(message.getJSONObject("bundle"))
+            "blob_ticket" -> blobRequests.remove(message.optString("requestId"))?.complete(message)
             "envelope" -> {
                 val from = message.getString("from")
                 val id = message.getString("id")
@@ -665,6 +733,11 @@ class CallService : Service() {
                         if (viewingPeer == from) markRead(from) else notifyConversation(from)
                     }
                     "receipt" -> update(state.copy(chatVersion = state.chatVersion + 1))
+                    AttachmentPayload.KIND -> {
+                        update(state.copy(chatVersion = state.chatVersion + 1))
+                        bestEffort { media().autoFetch(id, AutoFetchPolicy.Context(chatOpen = viewingPeer == from, metered = isMetered())) }
+                        if (viewingPeer == from) markRead(from) else notifyConversation(from)
+                    }
                     "call-key" -> {
                         require(payload.getString("owner") == from)
                         val key = android.util.Base64.decode(payload.getString("key"), android.util.Base64.NO_WRAP)
@@ -686,7 +759,7 @@ class CallService : Service() {
                 val id = message.getString("id")
                 inFlight.remove(id)
                 db { it.markDelivered(id) }
-                update(state.copy(chatVersion = state.chatVersion + 1, pending = db { it.pendingMessageCount() }))
+                refreshChat()
             }
             "call_created" -> {
                 if (state.phase != Phase.OUTGOING) return
@@ -753,6 +826,7 @@ class CallService : Service() {
             "error" -> {
                 val request = message.optString("requestId")
                 lookups.remove(request)?.completeExceptionally(IllegalStateException(message.optString("code")))
+                blobRequests.remove(request)?.completeExceptionally(TicketRefused(message.optString("code")))
                 val id = message.optString("id")
                 val code = message.optString("code")
                 if (id.isNotEmpty() && id in inFlight) rejectEnvelope(id, code)
@@ -1015,7 +1089,8 @@ class CallService : Service() {
 
     private suspend fun loadProfileCache() {
         profiles = db { it.profiles() }
-        update(state.copy(ownName = db { it.ownName() }, profileVersion = state.profileVersion + 1))
+        val own = db { it.ownName() }
+        update(state.copy(ownName = own, profileVersion = state.profileVersion + 1))
     }
 
     private suspend fun rememberProfile(number: String, json: JSONObject, notify: Boolean = true) {
@@ -1113,11 +1188,16 @@ class CallService : Service() {
             hideContent = !Settings.notifyPreview(this))
     }
 
-    private fun previewText(message: ChatMessage): String = when (message.kind) {
-        "image" -> getString(R.string.notif_photo)
-        "voice" -> getString(R.string.notif_voice)
-        "file" -> getString(R.string.notif_file)
-        else -> message.text
+    private fun previewText(message: ChatMessage): String {
+        if (message.kind == "text") return message.text
+        val labels = Locales.wrap(this)
+        return when (MediaPreview.key(message.kind, message.text)) {
+            "media:image" -> MediaPreview.caption(message.text)?.let { labels.getString(R.string.md_preview_photo_caption, it) }
+                ?: labels.getString(R.string.notif_photo)
+            "media:voice" -> labels.getString(R.string.notif_voice)
+            "media:file" -> labels.getString(R.string.notif_file)
+            else -> labels.getString(R.string.notif_new_message)
+        }
     }
 
     private fun enterPersistentForeground() {
@@ -1144,29 +1224,215 @@ class CallService : Service() {
     }
 
     // ---- attachments: voice messages, photos, files ---------------------------------------------------
-    // Contract used by the screens. Implemented by the media pipeline.
+    // Contract used by the screens. Sending encrypts a blob first, stores message + envelope + row in one transaction
+    // and uploads; the envelope leaves the outbox only after the upload (see SecureStore.pendingOutbox).
+
+    private val attachmentViews = AttachmentViews()
+    private val attachmentFiles by lazy { AttachmentFiles(filesDir, cacheDir) }
+
+    private val attachmentGateway = object : AttachmentGateway {
+        override val online: Boolean get() = state.online && state.server.supportsAttachments
+        override suspend fun ticket(request: TicketRequest): Ticket = blobTicket(request)
+        override fun transfer(): BlobTransfer? {
+            val client = http ?: return null
+            val endpoints = httpConfig ?: return null
+            return runCatching { BlobTransfer(client, BlobTransfer.originOf(endpoints.apiUrl)) }.getOrNull()
+        }
+        override fun acknowledgeBlob(blobId: String): Boolean = this@CallService.acknowledgeBlob(blobId)
+    }
+
+    private val attachmentListener = object : AttachmentEngine.Listener {
+        override fun attachmentChanged() { scope.launch { bumpAttachments() } }
+        override fun messageChanged() { work { refreshChat() } }
+        override fun uploaded(messageId: String) { work { flushOutbox() } }
+    }
+
+    private val attachmentEngine = scope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
+        AttachmentEngine(scope, secure.await(), attachmentFiles, attachmentGateway, attachmentViews, attachmentListener)
+    }
+
+    private suspend fun media(): AttachmentEngine = attachmentEngine.await()
+
+    private fun bumpAttachments() = update(state.copy(attachmentVersion = state.attachmentVersion + 1))
+
+    private fun isMetered(): Boolean = runCatching { network.isActiveNetworkMetered }.getOrDefault(true)
+
+    /** Asks the API server for a one-request grant to PUT or GET a blob. */
+    private suspend fun blobTicket(request: TicketRequest): Ticket {
+        if (!attachmentGateway.online) throw BlobException.Network(message = "Not connected")
+        val requestId = UUID.randomUUID().toString()
+        val pending = CompletableDeferred<JSONObject>()
+        blobRequests[requestId] = pending
+        try {
+            val (type, packet, blobId) = when (request) {
+                is TicketRequest.Upload -> Triple("blob_create",
+                    JSONObject().put("id", request.blobId).put("to", request.to).put("size", request.size), request.blobId)
+                is TicketRequest.Download -> Triple("blob_get", JSONObject().put("id", request.blobId), request.blobId)
+            }
+            if (!send(type, packet.put("requestId", requestId))) throw BlobException.Network(message = "Not connected")
+            val reply = withTimeoutOrNull(TICKET_TIMEOUT_MS) { pending.await() }
+                ?: throw BlobException.Network(message = "The server did not answer")
+            return try {
+                require(reply.getString("id").equals(blobId, ignoreCase = true))
+                Ticket(blobId.lowercase(), reply.getString("method"), reply.getString("path"), reply.getString("token"),
+                    reply.optLong("offset", 0), reply.optLong("size", 0))
+            } catch (e: Exception) {
+                throw BlobException.Server(502, "Invalid blob ticket")
+            }
+        } finally {
+            blobRequests.remove(requestId)
+        }
+    }
+
+    /** `blob_ack`: the blob is stored here, the server may drop it. Retried after a reconnect when the socket is down. */
+    private fun acknowledgeBlob(blobId: String): Boolean {
+        val sent = state.online && state.server.supportsAttachments && send("blob_ack", JSONObject().put("id", blobId))
+        if (sent) pendingBlobAcks.remove(blobId) else if (pendingBlobAcks.size < MAX_PENDING_BLOB_ACKS) pendingBlobAcks.add(blobId)
+        return sent
+    }
 
     /** Null for plain text. Cheap and synchronous: served from memory, filled by [attachments]. */
-    fun attachment(message: app.line.crypto.ChatMessage): AttachmentView? = TODO("media pipeline")
+    fun attachment(message: ChatMessage): AttachmentView? {
+        if (message.kind == "text") return null
+        attachmentViews.get(message.id)?.let { return it }
+        val payload = MediaIntake.descriptor(message.text) ?: return null
+        return AttachmentViews.build(message.id, payload, message.outgoing, null, false, message.state)
+    }
 
     /** Loads descriptors for the attachment messages in [messages] so that [attachment] can answer immediately. */
-    suspend fun attachments(messages: List<app.line.crypto.ChatMessage>) { TODO("media pipeline") }
+    suspend fun attachments(messages: List<ChatMessage>) {
+        val missing = messages.filter { it.kind != "text" && attachmentViews.get(it.id) == null }
+        if (missing.isEmpty()) return
+        val engine = media()
+        repeat(3) { attempt ->
+            val generation = attachmentViews.generation()
+            val rows = db { it.attachmentRows(missing.map(ChatMessage::id)) }
+            val built = missing.mapNotNull { message ->
+                val payload = MediaIntake.descriptor(message.text) ?: return@mapNotNull null
+                val row = rows[message.id]
+                val progress = engine.progressOf(message.id)
+                AttachmentViews.build(message.id, payload, message.outgoing, StoredStage.parse(row?.stage), row?.played ?: false,
+                    message.state, transferring = progress != null, progress = progress ?: 0f)
+            }
+            // A transfer that changed a stage while the rows were being read would be overwritten by older data.
+            if (attachmentViews.putAllIfUnchanged(built, generation) || attempt == 2) {
+                if (attempt == 2) built.forEach { attachmentViews.putIfAbsent(it) }
+                return
+            }
+        }
+    }
 
     /** Prepares (downscales, strips metadata), encrypts, queues and uploads. Works offline: the upload resumes later. */
-    suspend fun sendImage(peer: String, uri: android.net.Uri, caption: String? = null) { TODO("media pipeline") }
-    suspend fun sendFile(peer: String, uri: android.net.Uri) { TODO("media pipeline") }
-    suspend fun sendVoice(peer: String, recording: VoiceRecorder.Result) { TODO("media pipeline") }
+    suspend fun sendImage(peer: String, uri: android.net.Uri, caption: String? = null) {
+        requireMediaSend(peer)
+        val prepared = try {
+            ImageProcessor.prepare(this, uri)
+        } catch (e: AttachmentPrepareException) {
+            throw e.toSendException()
+        }
+        try {
+            val draft = MediaDraft.image(prepared.width, prepared.height, prepared.thumb, caption, prepared.mime)
+            queueMedia(peer, draft) { FileInputStream(prepared.file) }
+        } finally {
+            prepared.file.delete()
+        }
+    }
+
+    suspend fun sendFile(peer: String, uri: android.net.Uri) {
+        requireMediaSend(peer)
+        val info = try {
+            withContext(Dispatchers.IO) { ImageProcessor.fileInfo(this@CallService, uri) }
+        } catch (e: AttachmentPrepareException) {
+            throw e.toSendException()
+        }
+        if (info.size > MediaLimits.MAX_FILE_BYTES) throw AttachmentTooLarge(info.size, MediaLimits.MAX_FILE_BYTES)
+        queueMedia(peer, MediaDraft.file(info.name, info.mime)) {
+            try {
+                contentResolver.openInputStream(uri) ?: throw FileNotFoundException()
+            } catch (e: SecurityException) {
+                throw FileNotFoundException()
+            }
+        }
+    }
+
+    /** Deletes the recording's file once the message is queued; on an error the caller still owns it. */
+    suspend fun sendVoice(peer: String, recording: VoiceRecorder.Result) {
+        requireMediaSend(peer)
+        queueMedia(peer, MediaDraft.voice(recording.durationMs, recording.amplitudes, VoiceRecorder.MIME)) { FileInputStream(recording.file) }
+        recording.file.delete()
+    }
+
+    private suspend fun requireMediaSend(peer: String) {
+        if (!state.chatEnabled) throw MediaUnavailable()
+        chatSending.withLock { preparePeer(peer) }
+        if (!peerSupportsMedia(peer)) throw MediaNotSupportedByPeer(peer)
+        if (state.online && state.serverProtocol > 0 && !state.server.supportsAttachments) throw MediaUnavailable()
+        if (!db { it.outboxHasRoom() }) throw OutboxFull(OUTBOX_LIMIT)
+    }
+
+    private suspend fun queueMedia(peer: String, draft: MediaDraft, open: () -> InputStream) {
+        val messageId = UUID.randomUUID().toString()
+        val blobId = UUID.randomUUID().toString()
+        val key = AttachmentCrypto.newKey()
+        val plainSize = withContext(Dispatchers.IO) {
+            try {
+                open().use { attachmentFiles.seal(blobId, key, it) }
+            } catch (e: IOException) {
+                throw AttachmentUnreadable(e)
+            }
+        }
+        val payload = draft.toPayload(blobId, key, plainSize)
+        val descriptor = payload.toJson(messageId).toString()
+        try {
+            chatSending.withLock { db { it.queueAttachment(peer, messageId, descriptor, payload.displayKind(), blobId, payload.size) } }
+        } catch (e: Throwable) {
+            withContext(NonCancellable + Dispatchers.IO) { attachmentFiles.deleteBlob(blobId) }
+            throw e
+        }
+        attachmentViews.put(AttachmentViews.build(messageId, payload, true, StoredStage.QUEUED, false, MessageStatus.PENDING))
+        refreshChat()
+        media().upload(messageId)
+    }
 
     /** Downloads an incoming attachment if it has not been fetched yet. Idempotent; progress shows through [attachment]. */
-    suspend fun fetchAttachment(messageId: String) { TODO("media pipeline") }
+    suspend fun fetchAttachment(messageId: String) { media().fetch(messageId) }
 
     /** Decrypted copy in the cache for playing, viewing, saving or sharing. Fetches first when needed. */
-    suspend fun plainFile(messageId: String): java.io.File = TODO("media pipeline")
+    suspend fun plainFile(messageId: String): java.io.File = media().plainFile(messageId)
 
-    suspend fun markPlayed(messageId: String) { TODO("media pipeline") }
+    suspend fun markPlayed(messageId: String) {
+        if (!db { it.markPlayed(messageId) }) return
+        attachmentViews.update(messageId) { it.copy(played = true) }
+        bumpAttachments()
+    }
 
     /** Failed or expired upload/download: tries again. */
-    suspend fun retryAttachment(messageId: String) { TODO("media pipeline") }
+    suspend fun retryAttachment(messageId: String) {
+        val stored = db { it.attachment(messageId) } ?: return
+        val engine = media()
+        if (stored.outgoing) {
+            when (stored.stage) {
+                StoredStage.FAILED -> if (db { it.moveStage(messageId, StoredStage.QUEUED) }) {
+                    attachmentViews.update(messageId) { it.copy(stage = TransferStage.QUEUED, progress = 0f) }
+                    refreshChat()
+                    engine.upload(messageId)
+                }
+                StoredStage.QUEUED -> engine.upload(messageId)
+                StoredStage.UPLOADED -> retryEnvelope(messageId)
+                else -> Unit
+            }
+        } else {
+            when (stored.stage) {
+                StoredStage.FAILED, StoredStage.EXPIRED -> if (db { it.moveStage(messageId, StoredStage.REMOTE) }) {
+                    attachmentViews.update(messageId) { it.copy(stage = TransferStage.QUEUED, progress = 0f) }
+                    bumpAttachments()
+                    engine.fetch(messageId)
+                }
+                StoredStage.REMOTE -> engine.fetch(messageId)
+                else -> Unit
+            }
+        }
+    }
 
     companion object {
         const val ACTION_CONNECT = "app.line.action.CONNECT"
@@ -1178,6 +1444,9 @@ class CallService : Service() {
         private const val CALL_NETWORK_GRACE_MS = 20_000L
         private const val CALL_CONNECT_WAIT_MS = 10_000L
         private const val RESUME_WAIT_MS = 8_000L
+        private const val TICKET_TIMEOUT_MS = 15_000L
+        private const val MAX_PENDING_BLOB_ACKS = 200
+        private const val OUTBOX_LIMIT = 100
         private val QUIET_ERRORS = setOf("invalid_profile", "invalid_push_endpoint", "push_provider_unsupported", "rate_limited", "storage_unavailable")
 
         /** Keeps the connection alive in the background when the user allows it; safe to call while the app is in the foreground. */

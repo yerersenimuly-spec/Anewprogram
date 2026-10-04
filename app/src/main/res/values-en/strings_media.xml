@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="md_unsupported_message">This message isn\'t supported by your version of Line</string>
+    <string name="md_preview_photo_caption">Photo: %1$s</string>
+</resources>
