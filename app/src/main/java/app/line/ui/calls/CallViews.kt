@@ -27,11 +27,11 @@ object CallPalette {
     fun glassPressed(context: Context): Int = primary(context).withAlpha(0.22f)
 
     /** Soft light behind an avatar, fading to nothing at the edge. */
-    fun glow(context: Context, color: Int, strength: Float): GradientDrawable = GradientDrawable().apply {
+    fun glow(context: Context, color: Int, strength: Float, radiusDp: Float = 160f): GradientDrawable = GradientDrawable().apply {
         gradientType = GradientDrawable.RADIAL_GRADIENT
         colors = intArrayOf(color.withAlpha(strength), color.withAlpha(strength * 0.35f), color.withAlpha(0f))
         setGradientCenter(0.5f, 0.5f)
-        gradientRadius = context.dpf(160f)
+        gradientRadius = context.dpf(radiusDp)
     }
 }
 
@@ -161,5 +161,16 @@ class AvatarStack(context: Context, private val sizeDp: Int, private val overlap
             }
             holder(more, shown)
         }
+    }
+}
+
+/** Translucent pill and card backgrounds of the dark call surfaces. */
+object GradientPill {
+    fun of(context: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(CallPalette.glass(context)); cornerRadius = context.dpf(100f)
+    }
+
+    fun card(context: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(CallPalette.primary(context).withAlpha(0.08f)); cornerRadius = context.dpf(Dimens.RADIUS_L.toFloat())
     }
 }

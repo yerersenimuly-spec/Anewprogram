@@ -1,7 +1,6 @@
 package app.line.ui.screens
 
 import android.Manifest
-import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
@@ -148,34 +147,21 @@ class OnboardingScreen : Screen() {
     }
 
     private fun paste(field: LineField) {
-        val clip = context.getSystemService(ClipboardManager::class.java)?.primaryClip
-        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-        if (text.isBlank()) { host.toast(R.string.cp_paste_empty); return }
-        field.edit.setText(ConnectionCodes.extract(text))
+        val code = CodeEntry.clipboardCode(context)
+        if (code == null) { host.toast(R.string.cp_paste_empty); return }
+        field.edit.setText(code)
         field.edit.setSelection(field.edit.text.length)
         submit(field)
     }
 
     private fun submit(field: LineField) {
         when (val result = ConnectionCodes.parse(field.text())) {
-            is ConnectionCodes.Result.Valid -> confirm(result)
+            is ConnectionCodes.Result.Valid -> CodeEntry.confirm(host, result) { connect(result) }
             is ConnectionCodes.Result.Invalid -> {
                 UiSounds.play(context, UiCue.ERROR)
-                field.setError(str(when (result.problem) {
-                    ConnectionCodes.Problem.EMPTY -> R.string.cp_ob_code_empty
-                    ConnectionCodes.Problem.NOT_A_CODE -> R.string.cp_ob_code_not_a_code
-                    ConnectionCodes.Problem.TOO_LONG, ConnectionCodes.Problem.DAMAGED -> R.string.cp_ob_code_damaged
-                    ConnectionCodes.Problem.UNSUPPORTED -> R.string.cp_ob_code_unsupported
-                    ConnectionCodes.Problem.INVALID -> R.string.cp_ob_code_invalid
-                }))
+                field.setError(str(CodeEntry.problemText(result.problem)))
             }
         }
-    }
-
-    private fun confirm(code: ConnectionCodes.Result.Valid) {
-        host.hideKeyboard()
-        host.sheet().title(str(R.string.cp_confirm_title, code.host)).message(str(R.string.cp_confirm_body))
-            .buttons(str(R.string.cp_connect), secondary = str(R.string.cancel)) { connect(code) }.show()
     }
 
     // -- connect
