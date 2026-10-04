@@ -669,7 +669,7 @@ class CallService : Service() {
                 work { syncOwnProfile(info); refreshPeerProfiles() }
                 if (info.supportsAttachments) {
                     pendingBlobAcks.toList().forEach { acknowledgeBlob(it) }
-                    work { media().onOnline { peer -> AutoFetchPolicy.Context(viewingPeer == peer, isMetered()) } }
+                    work { bestEffort { media().onOnline { peer -> AutoFetchPolicy.Context(viewingPeer == peer, isMetered()) } } }
                 }
                 watchCallResume()
             }
@@ -1329,6 +1329,8 @@ class CallService : Service() {
             ImageProcessor.prepare(this, uri)
         } catch (e: AttachmentPrepareException) {
             throw e.toSendException()
+        } catch (e: IOException) {
+            throw MediaUnavailable(e)
         }
         try {
             val draft = MediaDraft.image(prepared.width, prepared.height, prepared.thumb, caption, prepared.mime)

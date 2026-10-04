@@ -107,6 +107,9 @@ class FakeGateway(private val server: FakeBlobServer) : AttachmentGateway {
     @Volatile var connected = true
     @Volatile var refuse: String? = null
     @Volatile var ticketDelayMs = 0L
+
+    /** The next this many tickets carry a token the server no longer knows (expired or lost in a restart). */
+    @Volatile var staleTickets = 0
     val requests = CopyOnWriteArrayList<TicketRequest>()
     val acknowledged = CopyOnWriteArrayList<String>()
     override val online: Boolean get() = connected
@@ -115,9 +118,10 @@ class FakeGateway(private val server: FakeBlobServer) : AttachmentGateway {
         requests += request
         if (ticketDelayMs > 0) delay(ticketDelayMs)
         refuse?.let { throw TicketRefused(it) }
+        val token = if (staleTickets > 0) "B".repeat(43).also { staleTickets-- } else server.token
         return when (request) {
-            is TicketRequest.Upload -> Ticket(request.blobId, "PUT", "/blob/${request.blobId}", server.token, server.create(request.blobId, request.size), 0)
-            is TicketRequest.Download -> Ticket(request.blobId, "GET", "/blob/${request.blobId}", server.token, 0, server.blobs[request.blobId]?.size?.toLong() ?: 0)
+            is TicketRequest.Upload -> Ticket(request.blobId, "PUT", "/blob/${request.blobId}", token, server.create(request.blobId, request.size), 0)
+            is TicketRequest.Download -> Ticket(request.blobId, "GET", "/blob/${request.blobId}", token, 0, server.blobs[request.blobId]?.size?.toLong() ?: 0)
         }
     }
 

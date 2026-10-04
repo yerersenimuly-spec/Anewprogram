@@ -12,6 +12,7 @@ import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 
 /**
  * Where attachment bytes live. Ciphertext stays in `filesDir/attachments/<blobId>.enc` (the sender's own copy too);
@@ -103,7 +104,7 @@ class AttachmentFiles(filesDir: File, cacheDir: File, private val clock: () -> L
     /** Everything this device keeps for one message: ciphertext, partial download and decrypted copy. */
     fun deleteMessage(messageId: String, blobId: String?) {
         blobId?.let(::deleteBlob)
-        File(sharedDir, uuid(messageId)).deleteRecursively()
+        shred(File(sharedDir, uuid(messageId)))
     }
 
     /** Deletes decrypted copies not touched for [maxAgeMs]; returns how many entries went. */
@@ -132,9 +133,30 @@ class AttachmentFiles(filesDir: File, cacheDir: File, private val clock: () -> L
         var removed = 0
         directory.listFiles()?.forEach { entry ->
             val newest = if (entry.isDirectory) entry.walkTopDown().maxOf { it.lastModified() } else entry.lastModified()
-            if (now - newest >= maxAgeMs && entry.deleteRecursively()) removed++
+            if (now - newest >= maxAgeMs && shred(entry)) removed++
         }
         return removed
+    }
+
+    /** Overwrites plaintext with zeros before deleting it; best effort, flash storage may keep old blocks. */
+    private fun shred(target: File): Boolean {
+        target.walkBottomUp().filter { it.isFile }.forEach { file ->
+            try {
+                RandomAccessFile(file, "rw").use { out ->
+                    val zeros = ByteArray(BUFFER)
+                    var left = out.length()
+                    while (left > 0) {
+                        val count = minOf(left, zeros.size.toLong()).toInt()
+                        out.write(zeros, 0, count)
+                        left -= count
+                    }
+                    out.fd.sync()
+                }
+            } catch (e: IOException) {
+                // Deleting is what matters.
+            }
+        }
+        return target.deleteRecursively()
     }
 
     private fun uuid(value: String): String {

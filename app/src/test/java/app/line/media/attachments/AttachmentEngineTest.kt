@@ -100,6 +100,26 @@ class AttachmentEngineTest {
         assertEquals(listOf(item.messageId), listener.uploaded)
     }
 
+    @Test fun anExpiredTicketIsReplacedImmediatelyForUploadsAndDownloads() = runBlocking {
+        val item = outgoing()
+        gateway.staleTickets = 1
+        assertEquals(AttachmentEngine.Outcome.DONE, engine.upload(item.messageId).await())
+        assertEquals(2, gateway.requests.size)
+
+        val remote = incoming(size = 20_000)
+        gateway.staleTickets = 2
+        assertEquals(AttachmentEngine.Outcome.DONE, engine.fetch(remote.messageId))
+        assertEquals(StoredStage.READY, repository.stage(remote.messageId))
+    }
+
+    @Test fun ticketsThatKeepFailingEndInAFailedAttachmentNotALoop() = runBlocking {
+        val item = outgoing()
+        gateway.staleTickets = 99
+        assertEquals(AttachmentEngine.Outcome.FAILED, engine.upload(item.messageId).await())
+        assertEquals(1 + TransferPolicy.MAX_TICKET_RENEWALS, gateway.requests.size)
+        assertEquals(StoredStage.FAILED, repository.stage(item.messageId))
+    }
+
     @Test fun anAlreadyCompleteBlobIsNotSentTwice() = runBlocking {
         val item = outgoing()
         server.blobs[item.blobId] = files.blob(item.blobId).readBytes()

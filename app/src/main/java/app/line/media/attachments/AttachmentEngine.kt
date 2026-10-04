@@ -196,7 +196,7 @@ class AttachmentEngine(
             if (stored.stage != StoredStage.READY) throw AttachmentUnavailable(stored.stage.toTransferStage(false))
         }
         val blob = files.blob(stored.blobId)
-        if (!blob.isFile) {
+        if (!withContext(io) { blob.isFile }) {
             if (stored.outgoing) throw AttachmentUnavailable(TransferStage.FAILED)
             // The file was lost: fetch it again if the server still has it.
             if (withContext(io) { repository.moveStage(messageId, StoredStage.REMOTE) }) show(messageId, TransferStage.QUEUED, 0f)
@@ -278,7 +278,7 @@ class AttachmentEngine(
             else -> return Step.Done(Outcome.GONE)
         }
         val blob = files.blob(stored.blobId)
-        if (!blob.isFile || blob.length() != stored.size) return fail(stored, expired = false)
+        if (!withContext(io) { blob.isFile && blob.length() == stored.size }) return fail(stored, expired = false)
         if (!gateway.online) return Step.Done(Outcome.WAITING)
         val transfer = gateway.transfer() ?: return Step.Done(Outcome.WAITING)
         show(id, TransferStage.TRANSFERRING, entry.progress)
@@ -304,7 +304,7 @@ class AttachmentEngine(
         val blob = files.blob(stored.blobId)
         when (stored.stage) {
             StoredStage.READY -> {
-                if (blob.isFile) return Step.Done(Outcome.DONE)
+                if (withContext(io) { blob.isFile }) return Step.Done(Outcome.DONE)
                 withContext(io) { repository.moveStage(id, StoredStage.REMOTE) }
                 stored = load(id) ?: return Step.Done(Outcome.GONE)
             }
@@ -350,7 +350,8 @@ class AttachmentEngine(
     private suspend fun react(stored: StoredAttachment, direction: TransferDirection, error: Exception, budget: Budget): Step =
         when (val decision = TransferPolicy.decide(direction, error, budget.attempt, budget.renewals)) {
             is TransferPolicy.Decision.Retry -> {
-                if (decision.newTicket) budget.renewals++ else budget.attempt++
+                budget.attempt++
+                if (decision.newTicket && decision.delayMs == 0L) budget.renewals++
                 show(stored.messageId, stored.stage.toTransferStage(false), 0f)
                 Step.Again(decision.delayMs)
             }

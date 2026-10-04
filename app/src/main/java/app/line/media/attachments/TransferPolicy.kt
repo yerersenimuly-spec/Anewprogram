@@ -39,7 +39,14 @@ object TransferPolicy {
         val download = direction == TransferDirection.DOWNLOAD
         return when (error) {
             is BlobException.NotFound -> if (download) Decision.Fail(true) else renew()
-            is BlobException.Unauthorized, is BlobException.Conflict -> renew()
+            // The server may still be draining the broken connection of the previous attempt (it answers 409 with the
+            // offset it holds until its idle timeout): give it time instead of burning the renewals.
+            is BlobException.Conflict -> when {
+                error.serverOffset == null -> renew()
+                attempt < MAX_ATTEMPTS -> Decision.Retry(backoff[attempt], true)
+                else -> Decision.Wait(IDLE_RETRY_MS)
+            }
+            is BlobException.Unauthorized -> renew()
             is BlobException.TooLarge, is BlobException.Quota -> Decision.Fail(false)
             is BlobException.RateLimited -> {
                 val wait = (error.retryAfterSeconds ?: 5).coerceIn(1, 60) * 1_000

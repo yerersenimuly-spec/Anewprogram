@@ -32,11 +32,19 @@ class TransferPolicyTest {
     }
 
     @Test fun rejectedTicketsAreRenewedAThreeTimesAtMost() {
-        listOf(BlobException.Unauthorized(), BlobException.Conflict(10)).forEach { error ->
+        listOf(BlobException.Unauthorized(), BlobException.Conflict()).forEach { error ->
             assertEquals(Decision.Retry(0, true), decide(UPLOAD, error))
             assertEquals(Decision.Retry(0, true), decide(DOWNLOAD, error, renewals = TransferPolicy.MAX_TICKET_RENEWALS - 1))
             assertEquals(Decision.Fail(false), decide(UPLOAD, error, renewals = TransferPolicy.MAX_TICKET_RENEWALS))
         }
+    }
+
+    @Test fun anUploadStateConflictWaitsForTheServerToLetGoInsteadOfFailing() {
+        val conflict = BlobException.Conflict(serverOffset = 4096)
+        val delays = (0 until TransferPolicy.MAX_ATTEMPTS).map { (decide(UPLOAD, conflict, attempt = it) as Decision.Retry).also { retry -> assertTrue(retry.newTicket) }.delayMs }
+        assertEquals(delays.sorted(), delays)
+        assertTrue(delays.sum() >= 30_000)
+        assertEquals(Decision.Wait(TransferPolicy.IDLE_RETRY_MS), decide(UPLOAD, conflict, attempt = TransferPolicy.MAX_ATTEMPTS, renewals = 99))
     }
 
     @Test fun aMissingBlobMeansExpiredForDownloadsAndANewUploadForUploads() {
