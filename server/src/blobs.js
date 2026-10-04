@@ -27,6 +27,7 @@ export function createBlobStore({
 }) {
   const entries = new Map();
   const tickets = new Map();
+  const inflight = new Set();
   let chain = Promise.resolve();
   let directoryReady = false;
   let activeUploads = 0;
@@ -403,12 +404,19 @@ export function createBlobStore({
       respond(response, 405, { headers: { allow: 'GET, PUT' } });
       return true;
     }
-    handler(request, response, id.toLowerCase()).catch(() => {
+    const task = handler(request, response, id.toLowerCase()).catch(() => {
       if (!response.headersSent) respond(response, 503, { headers: { 'retry-after': '5' }, close: true });
       else response.destroy();
     });
+    inflight.add(task);
+    task.finally(() => inflight.delete(task));
     return true;
   }
 
-  return { load, create, download, acknowledge, removeNumber, sweep, handleRequest };
+  // Resolves once queued store work and in-flight transfers have finished (used on shutdown).
+  async function drain() {
+    await Promise.allSettled([chain, ...inflight]);
+  }
+
+  return { load, create, download, acknowledge, removeNumber, sweep, handleRequest, drain };
 }

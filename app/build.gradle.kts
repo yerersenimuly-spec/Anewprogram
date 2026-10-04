@@ -50,7 +50,9 @@ android {
         release {
             isMinifyEnabled = false
             isDebuggable = false
-            signingConfigs.findByName("release")?.let { signingConfig = it }
+            // Without a dedicated keystore, sign release with the debug key so the
+            // APK installs directly over the debug build.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 }

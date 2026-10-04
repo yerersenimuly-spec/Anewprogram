@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "envelopes": [
+    {
+      "from": "69938944",
+      "to": "53232342",
+      "id": "7a1f0c2e-3b4d-4e5f-8a6b-000000000002",
+      "cipherType": 3,
+      "body": "Y2lwaGVydGV4dCBzZWNvbmQgcGVuZGluZyBtZXNzYWdl",
+      "createdAt": 4102444800000,
+      "expiresAt": 4103049600000
+    }
+  ],
+  "receipts": [
+    {
+      "from": "69938944",
+      "to": "53232342",
+      "id": "7a1f0c2e-3b4d-4e5f-8a6b-000000000001",
+      "cipherType": 3,
+      "cipherHash": "1cd6b048db2dac6badb1a140f913b9892db2754a81a21db1245e29cebddcf23c",
+      "createdAt": 4102444800001,
+      "expiresAt": 4103049600001
+    }
+  ]
+}

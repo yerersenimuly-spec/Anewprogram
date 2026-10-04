@@ -171,9 +171,10 @@ export function createSafeLookup({ allowPrivate = false, resolve = dns.lookup } 
 // Registration validation and the endpoint store
 // ---------------------------------------------------------------------------------------------
 
+// Distributors disagree on the alphabet and padding, so both base64url and plain base64 are accepted.
 function decodeBase64Url(value, expectedBytes) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+={0,2}$/.test(value)) return undefined;
-  const canonical = value.replace(/=+$/, '');
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_+/-]+={0,2}$/.test(value)) return undefined;
+  const canonical = value.replace(/=+$/, '').replaceAll('+', '-').replaceAll('/', '_');
   const bytes = Buffer.from(canonical, 'base64url');
   return bytes.length === expectedBytes && bytes.toString('base64url') === canonical ? bytes : undefined;
 }

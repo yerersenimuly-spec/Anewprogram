@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check:data": "node scripts/check-data-compat.mjs"
   },
   "dependencies": {
     "livekit-server-sdk": "2.19.1",

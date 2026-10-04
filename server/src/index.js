@@ -44,6 +44,14 @@ const BLOB_REQUEST_SHAPES = Object.freeze({
   blob_create: ['type', 'requestId', 'id', 'to', 'size'],
   blob_get: ['type', 'requestId', 'id'],
 });
+// The limits the server applies when it loads its stores; scripts/check-data-compat.mjs validates against the same ones.
+export const STORE_LIMITS = Object.freeze({
+  maxIdentities: 100_000,
+  mailboxTtlMs: DEFAULT_MAILBOX_TTL_MS,
+  maxMailboxEntries: DEFAULT_MAX_MAILBOX_ENTRIES,
+  maxMailboxPerUser: DEFAULT_MAX_MAILBOX_PER_USER,
+  maxReceiptEntries: DEFAULT_MAX_RECEIPTS,
+});
 const DEFAULT_ADMIN_SETTINGS = Object.freeze({
   callsEnabled: true,
   chatEnabled: true,
@@ -547,6 +555,7 @@ export async function createSignalingServer(options = {}) {
   let closing = false;
   const profileSetLimiter = createRateLimiter({ limit: 10, windowMs: 60_000, maxEntries: maxRateLimitEntries });
   const blobCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000, maxEntries: maxRateLimitEntries });
+  const pushRegisterLimiter = createRateLimiter({ limit: 20, windowMs: 60_000, maxEntries: maxRateLimitEntries });
 
   const httpServer = createServer((request, response) => {
     if (request.method === 'GET' && (request.url === '/health' || request.url === '/')) {
@@ -1258,10 +1267,11 @@ export async function createSignalingServer(options = {}) {
     }
     session.number = number;
     session.protocolVersion = Math.min(protocolVersion, PROTOCOL_VERSION);
+    // Decided before the session becomes visible, so a client that cannot resume never sees `ended` ahead of `registered`.
+    const resumedCall = takeCallResume(number, session.protocolVersion);
     sessions.set(number, session);
     clearTimeout(timers.get(session));
     appendAdminEvent('registration');
-    const resumedCall = takeCallResume(number, session.protocolVersion);
     const registered = {
       type: 'registered', number, mediaReady: Boolean(mediaConfig),
       callsEnabled: adminSettings.callsEnabled,
@@ -1531,8 +1541,8 @@ export async function createSignalingServer(options = {}) {
     const result = await blobs.create({ owner: session.number, to: message.to, id, size: message.size });
     if (result.error) return reply(result.error);
     send(session.socket, {
-      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'PUT', path: `/blob/${id}`,
-      token: result.token, expiresAt: result.expiresAt, offset: result.offset,
+      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'PUT', path: `/blob/${message.id}`,
+      token: result.token, expiresAt: result.expiresAt, offset: result.offset, size: message.size,
     });
   }
 
@@ -1543,8 +1553,8 @@ export async function createSignalingServer(options = {}) {
     const result = blobs.download({ number: session.number, id });
     if (result.error) return reply(result.error);
     send(session.socket, {
-      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'GET', path: `/blob/${id}`,
-      token: result.token, expiresAt: result.expiresAt, size: result.size, from: result.from,
+      type: 'blob_ticket', requestId: message.requestId, id: message.id, method: 'GET', path: `/blob/${message.id}`,
+      token: result.token, expiresAt: result.expiresAt, offset: 0, size: result.size, from: result.from,
     });
   }
 
@@ -1607,6 +1617,7 @@ export async function createSignalingServer(options = {}) {
         if (session.protocolVersion < 7) return error(session.socket, 'invalid_message');
         if (session.protocolVersion >= 8 && message.provider !== undefined) {
           if (typeof message.provider !== 'string') return error(session.socket, 'invalid_message');
+          if (!pushRegisterLimiter.take(session.number)) return error(session.socket, 'rate_limited');
           return queueStoreOperation(session, () => registerPushEndpoint(session, message), (code) => error(session.socket, code));
         }
         // Firebase tokens are no longer accepted: report that push is not available for this registration.
@@ -1822,6 +1833,7 @@ export async function createSignalingServer(options = {}) {
         httpServer.closeAllConnections?.();
       });
       await new Promise((resolveClose) => wss.close(() => resolveClose()));
+      await Promise.allSettled([storeQueue, blobs.drain()]);
     },
   };
 }
