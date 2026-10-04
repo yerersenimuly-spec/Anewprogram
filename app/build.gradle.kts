@@ -45,9 +45,11 @@ android {
             }
         }
     }
+    androidResources { localeFilters += listOf("ru", "en", "kk") }
     buildTypes {
         release {
             isMinifyEnabled = false
+            isDebuggable = false
             signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
