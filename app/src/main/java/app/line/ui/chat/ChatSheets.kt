@@ -39,7 +39,7 @@ internal fun Host.safetySheet(peer: String, code: String, verified: Boolean, onR
     val card = context.label(SafetyCode.format(code), TextStyle.TITLE).apply {
         gravity = Gravity.CENTER
         letterSpacing = 0.04f
-        setLineSpacing(dp(10).toFloat(), 1f)
+        setLineSpacing(dp(8).toFloat(), 1f)
         background = context.roundRect(R.color.surface_raised, Dimens.RADIUS_L)
         setPadding(dp(16), dp(20), dp(16), dp(20))
         contentDescription = code.chunked(5).joinToString(", ")
@@ -47,7 +47,7 @@ internal fun Host.safetySheet(peer: String, code: String, verified: Boolean, onR
     sheet.content(context.column {
         setPadding(dp(Dimens.SCREEN_PADDING), 0, dp(Dimens.SCREEN_PADDING), dp(16))
         if (verified) addView(context.label(context.getString(R.string.contact_verified), TextStyle.CAPTION_STRONG, R.color.positive),
-            LinearLayout.LayoutParams(WRAP, WRAP).apply { bottomMargin = dp(10) })
+            LinearLayout.LayoutParams(WRAP, WRAP).apply { bottomMargin = dp(8) })
         addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
     })
     var answered = false

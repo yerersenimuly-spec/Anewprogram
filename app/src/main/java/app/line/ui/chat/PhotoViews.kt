@@ -15,6 +15,7 @@ import android.view.View
 import android.widget.FrameLayout
 import app.line.R
 import app.line.core.TransferStage
+import app.line.ui.Dimens
 import app.line.ui.ProgressRing
 import app.line.ui.TextStyle
 import app.line.ui.color
@@ -134,8 +135,8 @@ class PhotoContent(context: Context, private val scope: CoroutineScope) : FrameL
     private val photo = PhotoView(context)
     private val ring = ProgressRing(context).apply { visibility = View.GONE }
     private val note = context.label("", TextStyle.CAPTION_STRONG, R.color.on_accent).apply {
-        background = context.roundRect(R.color.scrim, 10)
-        setPadding(dp(10), dp(4), dp(10), dp(4))
+        background = context.roundRect(R.color.scrim, Dimens.RADIUS_S)
+        setPadding(dp(12), dp(4), dp(12), dp(4))
         visibility = View.GONE
     }
     private var boundId: String? = null

@@ -84,36 +84,36 @@ class ContactScreen(private val peer: String, private val fromConversation: Bool
         add(ListRow(context).apply {
             title.text = context.getString(R.string.contact_number)
             subtitle(peer.spacedNumber())
-            leading(context.icon("phone", R.color.text_secondary, 22))
+            leading(context.icon("phone", R.color.text_secondary, 24))
             trailing(context.icon("copy", R.color.text_tertiary, 20))
             onClick { host.copyToClipboard(context.getString(R.string.contact_number), peer) }
         })
         if (profile != null && profile != local) add(ListRow(context).apply {
             title.text = context.getString(R.string.cv_contact_profile_name)
             subtitle(profile)
-            leading(context.icon("person", R.color.text_secondary, 22))
+            leading(context.icon("person", R.color.text_secondary, 24))
             isClickable = false
         })
         add(ListRow(context).apply {
             title.text = context.getString(R.string.contact_security_title)
             subtitle(context.getString(if (verified == true) R.string.contact_verified else R.string.contact_not_verified))
-            leading(context.icon("shield_check", if (verified == true) R.color.positive else R.color.text_secondary, 22))
+            leading(context.icon("shield_check", if (verified == true) R.color.positive else R.color.text_secondary, 24))
             onClick { host.startVerification(peer) { loadTrust() } }
         })
         add(ListRow(context).apply {
             title.text = context.getString(R.string.conv_menu_rename)
-            leading(context.icon("edit", R.color.text_secondary, 22))
+            leading(context.icon("edit", R.color.text_secondary, 24))
             onClick { host.renameSheet(peer) { render() } }
         })
         add(ListRow(context).apply {
             title.text = context.getString(R.string.conv_menu_search)
-            leading(context.icon("search", R.color.text_secondary, 22))
+            leading(context.icon("search", R.color.text_secondary, 24))
             onClick { host.push(SearchScreen(peer)) }
         })
         add(ListRow(context).apply {
             title.text = context.getString(R.string.conv_menu_clear)
             title.setTextColor(context.color(R.color.negative))
-            leading(context.icon("trash", R.color.negative, 22))
+            leading(context.icon("trash", R.color.negative, 24))
             onClick { confirmClear() }
         }, last = true)
         content.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = context.dp(24) })
@@ -125,7 +125,7 @@ class ContactScreen(private val peer: String, private val fromConversation: Bool
         val color = if (ok) R.color.positive else R.color.text_secondary
         return context.row {
             addView(context.icon(if (ok) "shield_check" else "alert", color, 16))
-            addView(context.label(text, TextStyle.CAPTION_STRONG, color), LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = context.dp(6) })
+            addView(context.label(text, TextStyle.CAPTION_STRONG, color), LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = context.dp(8) })
             visibility = if (verified == null) View.INVISIBLE else View.VISIBLE
         }
     }

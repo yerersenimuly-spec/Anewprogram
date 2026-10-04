@@ -149,7 +149,7 @@ class ConversationScreen(val peer: String, private val focusSequence: Long? = nu
         body.addView(recycler, FrameLayout.LayoutParams(MATCH, MATCH))
         body.addView(skeleton, FrameLayout.LayoutParams(MATCH, MATCH))
         body.addView(empty, FrameLayout.LayoutParams(MATCH, MATCH))
-        body.addView(jump, FrameLayout.LayoutParams(context.dp(44), context.dp(44), Gravity.BOTTOM or Gravity.END).apply { marginEnd = context.dp(16); bottomMargin = context.dp(12) })
+        body.addView(jump, FrameLayout.LayoutParams(context.dp(48), context.dp(48), Gravity.BOTTOM or Gravity.END).apply { marginEnd = context.dp(16); bottomMargin = context.dp(12) })
         root.addView(body, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         notice = buildNotice()
@@ -190,17 +190,17 @@ class ConversationScreen(val peer: String, private val focusSequence: Long? = nu
     }
 
     private fun buildJump(): FrameLayout = FrameLayout(context).apply {
-        background = context.roundRect(R.color.surface, 22, R.color.outline)
-        elevation = context.dpf(3f)
+        background = context.roundRect(R.color.surface, 24, R.color.outline)
+        elevation = context.dpf(4f)
         visibility = View.GONE
         isClickable = true
         contentDescription = context.getString(R.string.conv_scroll_down)
-        addView(IconView(context, "chevron_down", R.color.text_primary), FrameLayout.LayoutParams(context.dp(22), context.dp(22), Gravity.CENTER))
+        addView(IconView(context, "chevron_down", R.color.text_primary), FrameLayout.LayoutParams(context.dp(24), context.dp(24), Gravity.CENTER))
         jumpBadge = context.label("", TextStyle.MICRO, R.color.on_accent).apply {
             gravity = Gravity.CENTER
             background = context.roundRect(R.color.accent, 9)
-            setPadding(context.dp(5), context.dp(2), context.dp(5), context.dp(2))
-            minWidth = context.dp(18)
+            setPadding(context.dp(4), context.dp(2), context.dp(4), context.dp(2))
+            minWidth = context.dp(20)
             visibility = View.GONE
         }
         addView(jumpBadge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply { topMargin = context.dp(-6); marginEnd = context.dp(-2) })
@@ -213,7 +213,7 @@ class ConversationScreen(val peer: String, private val focusSequence: Long? = nu
         setPadding(context.dp(Dimens.SCREEN_PADDING), context.dp(4), context.dp(8), context.dp(4))
         addView(IconView(context, "shield_check", R.color.accent), LinearLayout.LayoutParams(context.dp(20), context.dp(20)))
         noticeText = context.label("", TextStyle.CALLOUT, maxLines = 2)
-        addView(noticeText, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = context.dp(12); topMargin = context.dp(6); bottomMargin = context.dp(6) })
+        addView(noticeText, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = context.dp(12); topMargin = context.dp(8); bottomMargin = context.dp(8) })
         noticeAction = context.textButton(context.getString(R.string.conv_verify_action)) { verify() }
         addView(noticeAction)
     }

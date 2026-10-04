@@ -24,7 +24,6 @@ import android.widget.TextView
 import app.line.R
 import app.line.ui.Dimens
 import app.line.ui.IconView
-import app.line.ui.Motion
 import app.line.ui.TextStyle
 import app.line.ui.UiCue
 import app.line.ui.UiSounds
@@ -56,7 +55,7 @@ interface VoiceInput {
 class LevelMeterView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = context.color(R.color.accent) }
     private val rect = RectF()
-    private val barWidth = dpf(3f)
+    private val barWidth = dpf(2f)
     private val gap = dpf(2f)
     private var levels = FloatArray(0)
     private var count = 0
@@ -79,7 +78,7 @@ class LevelMeterView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
         for (index in levels.indices) {
-            val barHeight = max(dpf(3f), levels[index] * height)
+            val barHeight = max(dpf(2f), levels[index] * height)
             val left = index * (barWidth + gap)
             val x = if (rtl) width - left - barWidth else left
             rect.set(x, (height - barHeight) / 2f, x + barWidth, (height + barHeight) / 2f)
@@ -98,7 +97,7 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
     var onHint: (() -> Unit)? = null
 
     val field = EditText(context)
-    private val attach: View = context.iconButton("attach", context.getString(R.string.conv_attach), tintRes = R.color.text_secondary) { onAttach?.invoke() }
+    private val attach: View = context.iconButton("attach", context.getString(R.string.conv_attach), tintRes = R.color.text_secondary, sizeDp = 48) { onAttach?.invoke() }
     private val action = FrameLayout(context)
     private val micIcon = IconView(context, "mic", R.color.on_accent)
     private val sendIcon = IconView(context, "send", R.color.on_accent)
@@ -142,9 +141,9 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
         field.style(TextStyle.BODY)
         field.hint = context.getString(R.string.conv_message_hint)
         field.setHintTextColor(context.color(R.color.text_tertiary))
-        field.background = context.roundRect(R.color.surface_raised, 22)
-        field.setPadding(dp(16), dp(11), dp(16), dp(11))
-        field.minHeight = dp(44)
+        field.background = context.roundRect(R.color.surface_raised, 24)
+        field.setPadding(dp(16), dp(12), dp(16), dp(12))
+        field.minHeight = dp(48)
         field.maxLines = 5
         field.gravity = Gravity.CENTER_VERTICAL
         field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -156,9 +155,9 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
             override fun afterTextChanged(s: Editable?) { renderActionMode(animate = true) }
         })
 
-        action.background = context.accentGradient(22).apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
-        action.addView(micIcon, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
-        action.addView(sendIcon, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        action.background = context.accentGradient(24).apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
+        action.addView(micIcon, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        action.addView(sendIcon, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
         action.isClickable = true
         action.isFocusable = true
         action.setOnTouchListener { _, event -> onActionTouch(event) }
@@ -167,38 +166,39 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
         inputRow.orientation = LinearLayout.HORIZONTAL
         inputRow.gravity = Gravity.BOTTOM
         inputRow.setPadding(dp(4), dp(8), dp(8), dp(8))
-        inputRow.addView(attach, LinearLayout.LayoutParams(dp(44), dp(44)))
+        inputRow.addView(attach, LinearLayout.LayoutParams(dp(48), dp(48)))
         inputRow.addView(field, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
-        inputRow.addView(action, LinearLayout.LayoutParams(dp(44), dp(44)))
+        inputRow.addView(action, LinearLayout.LayoutParams(dp(48), dp(48)))
         addView(inputRow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
-        trash = context.iconButton("trash", context.getString(R.string.voice_cancel), tintRes = R.color.negative) { finish(send = false) }.apply { visibility = View.GONE }
+        trash = context.iconButton("trash", context.getString(R.string.voice_cancel), tintRes = R.color.negative, sizeDp = 48) { finish(send = false) }.apply { visibility = View.GONE }
         dot.background = context.circle(R.color.negative)
         bar.orientation = LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
         bar.setBackgroundColor(context.color(R.color.surface))
         bar.setPadding(dp(12), dp(8), dp(4), dp(8))
         bar.visibility = View.GONE
-        bar.addView(trash, LinearLayout.LayoutParams(dp(44), dp(44)))
-        bar.addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginStart = dp(4); marginEnd = dp(10) })
+        bar.addView(trash, LinearLayout.LayoutParams(dp(48), dp(48)))
+        bar.addView(dot, LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginStart = dp(4); marginEnd = dp(12) })
         bar.addView(timer, LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT))
         bar.addView(meter, LinearLayout.LayoutParams(0, dp(28), 1f).apply { marginEnd = dp(8) })
         bar.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         bar.contentDescription = context.getString(R.string.voice_recording)
-        addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.BOTTOM).apply { marginEnd = dp(60) })
+        addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.BOTTOM).apply { marginEnd = dp(56) })
 
-        lockPill.background = context.roundRect(R.color.surface_raised, 22)
+        lockPill.background = context.roundRect(R.color.surface_raised, 24)
         lockPill.visibility = View.GONE
         lockPill.elevation = dpf(2f)
         lockPill.addView(lockIcon, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
         lockPill.contentDescription = context.getString(R.string.cv_voice_lock)
-        addView(lockPill, LayoutParams(dp(44), dp(60), Gravity.BOTTOM or Gravity.END).apply { marginEnd = dp(8); bottomMargin = dp(64) })
+        addView(lockPill, LayoutParams(dp(48), dp(64), Gravity.BOTTOM or Gravity.END).apply { marginEnd = dp(8) })
 
-        Motion.press(action)
         renderActionMode(animate = false)
     }
 
     private val locked get() = gesture?.state == RecordGesture.State.LOCKED
+
+    private companion object { const val LOCK_BASE = -72f }
 
     fun text(): String = field.text.toString()
 
@@ -249,7 +249,7 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
                 val entered = g.move(event.rawX, event.rawY)
                 hint.translationX = -g.cancelProgress * dpf(48f) * (if (rtl) -1 else 1)
                 hint.alpha = 1f - g.cancelProgress * 0.6f
-                lockPill.translationY = -g.lockProgress * dpf(24f)
+                lockPill.translationY = LOCK_BASE * dpf(1f) - g.lockProgress * dpf(24f)
                 if (entered == RecordGesture.State.CANCEL_ARMED) { hint.setTextColor(context.color(R.color.negative)); tickHaptic(reject = true) }
                 if (entered == RecordGesture.State.HOLDING) hint.setTextColor(context.color(R.color.text_secondary))
                 if (entered == RecordGesture.State.LOCKED) { tickHaptic(reject = false); enterLockedUi() }
@@ -312,7 +312,7 @@ class ComposerView(context: Context, private val voice: VoiceInput) : FrameLayou
             dot.visibility = View.VISIBLE
             bar.visibility = View.VISIBLE
             lockPill.visibility = View.VISIBLE
-            lockPill.translationY = 0f
+            lockPill.translationY = LOCK_BASE * dpf(1f)
             micIcon.alpha = 1f
             action.animate().scaleX(1.25f).scaleY(1.25f).setDuration(120).start()
             if (ValueAnimator.areAnimatorsEnabled()) {

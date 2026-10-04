@@ -62,6 +62,7 @@ class ChatsScreen : Screen() {
 
     private var conversations: List<Conversation> = emptyList()
     private var loaded = false
+    private var shown = false
     private var hasMore = true
     private var loading = false
     private var job: Job? = null
@@ -74,7 +75,9 @@ class ChatsScreen : Screen() {
             .action("search", context.getString(R.string.chats_search)) { host.push(SearchScreen(null)) }
             .action("compose", context.getString(R.string.chats_new)) { host.push(NewChatScreen()) })
         held = buildHeldBanner()
-        root.addView(held, LinearLayout.LayoutParams(MATCH, WRAP))
+        root.addView(held, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+            marginStart = context.dp(Dimens.SCREEN_PADDING - 4); marginEnd = context.dp(Dimens.SCREEN_PADDING - 4); bottomMargin = context.dp(8)
+        })
         val body = FrameLayout(context)
         list = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -110,7 +113,7 @@ class ChatsScreen : Screen() {
         background = context.ripple(context.roundRect(R.color.accent_soft, Dimens.RADIUS_L), Dimens.RADIUS_L)
         isClickable = true
         isFocusable = true
-        setPadding(context.dp(14), context.dp(12), context.dp(8), context.dp(12))
+        setPadding(context.dp(16), context.dp(12), context.dp(8), context.dp(12))
         addView(context.tintedIcon("shield_check"), LinearLayout.LayoutParams(context.dp(36), context.dp(36)))
         val text = context.column {
             heldTitle = context.label("", TextStyle.BODY_STRONG, maxLines = 1)
@@ -121,9 +124,6 @@ class ChatsScreen : Screen() {
         addView(text, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = context.dp(12) })
         addView(context.textButton(context.getString(R.string.held_action)) { openHeld() })
         setOnClickListener { openHeld() }
-        layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply {
-            marginStart = context.dp(Dimens.SCREEN_PADDING - 4); marginEnd = context.dp(Dimens.SCREEN_PADDING - 4); bottomMargin = context.dp(8)
-        }
     }
 
     private fun renderHeld(state: CallState) {
@@ -151,10 +151,12 @@ class ChatsScreen : Screen() {
 
     override fun onServiceReady() { reload() }
 
-    override fun onShown() { reload() }
+    override fun onShown() { shown = true; reload() }
+
+    override fun onHidden() { shown = false }
 
     override fun onState(old: CallState, new: CallState) {
-        if (!isBuilt) return
+        if (!isBuilt || !shown) return
         if (old.heldSenders != new.heldSenders) renderHeld(new)
         if (old.chatVersion != new.chatVersion || old.profileVersion != new.profileVersion || old.pending != new.pending) reload()
     }

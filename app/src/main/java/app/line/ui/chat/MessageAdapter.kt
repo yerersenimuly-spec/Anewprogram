@@ -99,10 +99,10 @@ class MessageAdapter(
         if (viewType == DAY) {
             val text = context.label("", TextStyle.CAPTION_STRONG, R.color.text_secondary).apply {
                 background = context.roundRect(R.color.surface_raised, 12)
-                setPadding(context.dp(12), context.dp(5), context.dp(12), context.dp(5))
+                setPadding(context.dp(12), context.dp(4), context.dp(12), context.dp(4))
             }
             container.addView(text, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
-                .apply { topMargin = context.dp(14); bottomMargin = context.dp(6) })
+                .apply { topMargin = context.dp(16); bottomMargin = context.dp(8) })
             return DayHolder(text, container)
         }
         container.setPadding(context.dp(12), 0, context.dp(12), 0)
@@ -113,8 +113,8 @@ class MessageAdapter(
         var file: FileContent? = null
         when (viewType) {
             PHOTO -> photo = PhotoContent(context, scope).also { bubble.media.addView(it) }
-            VOICE -> voice = VoiceContent(context, format).also { bubble.media.addView(it) }
-            FILE -> file = FileContent(context).also { bubble.media.addView(it) }
+            VOICE -> voice = VoiceContent(context, format).also { bubble.media.addView(it, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
+            FILE -> file = FileContent(context).also { bubble.media.addView(it, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
         }
         bubble.showMedia(viewType != TEXT)
         val holder = MsgHolder(container, bubble, photo, voice, file)

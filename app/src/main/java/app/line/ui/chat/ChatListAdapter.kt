@@ -44,15 +44,15 @@ class ChatRowView(context: Context) : LinearLayout(context) {
     private val preview = context.label("", TextStyle.CALLOUT, R.color.text_secondary, maxLines = 1)
     private val badge = context.label("", TextStyle.MICRO, R.color.on_accent).apply {
         gravity = Gravity.CENTER
-        background = context.roundRect(R.color.accent, 10)
-        setPadding(dp(6), dp(2), dp(6), dp(2))
+        background = context.roundRect(R.color.accent, Dimens.RADIUS_S)
+        setPadding(dp(4), dp(2), dp(4), dp(2))
         minWidth = dp(20)
     }
 
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(Dimens.SCREEN_PADDING), dp(10), dp(Dimens.SCREEN_PADDING), dp(10))
+        setPadding(dp(Dimens.SCREEN_PADDING), dp(12), dp(Dimens.SCREEN_PADDING), dp(12))
         background = context.ripple(null)
         isClickable = true
         isFocusable = true
@@ -60,15 +60,15 @@ class ChatRowView(context: Context) : LinearLayout(context) {
         val column = LinearLayout(context).apply { orientation = VERTICAL }
         val top = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(title, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(ticks, LayoutParams(dp(18), dp(16)).apply { marginStart = dp(8) })
+        top.addView(ticks, LayoutParams(dp(16), dp(16)).apply { marginStart = dp(8) })
         top.addView(stamp, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(2) })
         val bottom = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         bottom.addView(kindIcon, LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(4) })
         bottom.addView(preview, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         bottom.addView(badge, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12) })
         column.addView(top, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        column.addView(bottom, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
-        addView(column, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
+        column.addView(bottom, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        addView(column, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(16) })
     }
 
     fun bind(row: ChatRow) {

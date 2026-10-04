@@ -44,8 +44,8 @@ class NewChatScreen : Screen() {
 
         number = LineField(context, context.getString(R.string.newchat_number_hint))
         number.edit.apply {
-            setRawInputType(InputType.TYPE_CLASS_NUMBER)
             keyListener = DigitsKeyListener.getInstance("0123456789 ")
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
             filters = arrayOf<InputFilter>(InputFilter.LengthFilter(NumberEntry.LENGTH + 1))
             imeOptions = EditorInfo.IME_ACTION_NEXT
             addTextChangedListener(object : TextWatcher {

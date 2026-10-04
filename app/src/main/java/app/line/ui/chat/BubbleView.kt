@@ -66,7 +66,7 @@ class BubbleView(context: Context) : ViewGroup(context) {
         orientation = LinearLayout.HORIZONTAL
         gravity = android.view.Gravity.CENTER_VERTICAL
         addView(time)
-        addView(ticks, LinearLayout.LayoutParams(dp(18), dp(16)).apply { marginStart = dp(2) })
+        addView(ticks, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginStart = dp(2) })
     }
 
     var listener: BubbleListener? = null
@@ -74,7 +74,7 @@ class BubbleView(context: Context) : ViewGroup(context) {
         private set
     private var first = true
     private var metaMode = MetaMode.INLINE
-    private var pillBackground = context.roundRect(R.color.scrim, 10)
+    private var pillBackground = context.roundRect(R.color.scrim, Dimens.RADIUS_S)
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f }
@@ -137,7 +137,7 @@ class BubbleView(context: Context) : ViewGroup(context) {
             else -> R.color.bubble_in_meta
         }))
         meta.background = if (onPill) pillBackground else null
-        meta.setPadding(if (onPill) dp(8) else 0, if (onPill) dp(3) else 0, if (onPill) dp(8) else 0, if (onPill) dp(3) else 0)
+        meta.setPadding(if (onPill) dp(8) else 0, if (onPill) dp(4) else 0, if (onPill) dp(8) else 0, if (onPill) dp(4) else 0)
         if (status != null) { ticks.visibility = View.VISIBLE; ticks.bind(status, onBubble = true) } else ticks.visibility = View.GONE
     }
 
@@ -244,7 +244,7 @@ class BubbleView(context: Context) : ViewGroup(context) {
 
     private fun rebuildShape() {
         val big = dpf(Dimens.RADIUS_L.toFloat())
-        val tight = dpf(6f)
+        val tight = dpf(4f)
         val tightRight = outgoing != rtl
         val tl = if (tightRight || first) big else tight
         val tr = if (!tightRight || first) big else tight

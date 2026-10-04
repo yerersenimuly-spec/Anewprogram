@@ -212,13 +212,13 @@ private class SearchAdapter(private val showPerson: Boolean, private val onOpen:
         column.addView(snippet, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = context.dp(2) })
         val row = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(context.dp(Dimens.SCREEN_PADDING), context.dp(10), context.dp(Dimens.SCREEN_PADDING), context.dp(10))
+            setPadding(context.dp(Dimens.SCREEN_PADDING), context.dp(12), context.dp(Dimens.SCREEN_PADDING), context.dp(12))
             background = context.ripple(null)
             isClickable = true
             isFocusable = true
             layoutParams = RecyclerView.LayoutParams(MATCH, WRAP)
         }
-        if (showPerson) row.addView(avatar, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(14) })
+        if (showPerson) row.addView(avatar, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(16) })
         row.addView(column, LinearLayout.LayoutParams(0, WRAP, 1f))
         val holder = Holder(row, avatar, title, stamp, snippet)
         row.setOnClickListener { holder.bindingAdapterPosition.takeIf { it != RecyclerView.NO_POSITION }?.let { onOpen(getItem(it)) } }

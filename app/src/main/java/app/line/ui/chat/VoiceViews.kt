@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import app.line.R
 import app.line.core.TransferStage
+import app.line.ui.Dimens
 import app.line.ui.IconView
 import app.line.ui.ProgressRing
 import app.line.ui.TextStyle
@@ -39,7 +40,7 @@ class WaveformView(context: Context) : View(context) {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
-    private val barWidth = dpf(3f)
+    private val barWidth = dpf(2f)
     private val gap = dpf(2f)
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var source: ByteArray? = null
@@ -68,7 +69,7 @@ class WaveformView(context: Context) : View(context) {
         val count = max(1, ((width + gap) / (barWidth + gap)).toInt())
         if (bars.size != count) bars = VoiceMath.bars(source, count)
         val played = VoiceMath.playedBars(scrub ?: progress, count)
-        val minHeight = dpf(3f)
+        val minHeight = dpf(2f)
         val usable = height.toFloat()
         val step = if (count > 1) (width - barWidth) / (count - 1) else 0f
         for (index in 0 until count) {
@@ -113,14 +114,14 @@ class PlayButton(context: Context) : FrameLayout(context) {
     private val ring = ProgressRing(context).apply { visibility = View.GONE }
 
     init {
-        addView(glyph, LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        addView(glyph, LayoutParams(dp(24), dp(24), Gravity.CENTER))
         addView(ring, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         isClickable = true
         isFocusable = true
     }
 
     fun style(outgoing: Boolean) {
-        background = if (outgoing) context.circle(R.color.on_accent) else context.accentGradient(22).apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
+        background = if (outgoing) context.circle(R.color.on_accent) else context.accentGradient(24).apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
         glyph.setTint(if (outgoing) R.color.accent else R.color.on_accent)
     }
 
@@ -169,16 +170,16 @@ class VoiceContent(context: Context, private val format: ChatFormat) : LinearLay
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(10), dp(10), dp(12), dp(10))
-        addView(play, LayoutParams(dp(44), dp(44)))
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        addView(play, LayoutParams(dp(48), dp(48)))
         val column = LinearLayout(context).apply { orientation = VERTICAL }
         column.addView(wave, LayoutParams(LayoutParams.MATCH_PARENT, dp(28)))
         val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(time)
-        row.addView(dot, LayoutParams(dp(8), dp(8)).apply { marginStart = dp(6) })
+        row.addView(dot, LayoutParams(dp(8), dp(8)).apply { marginStart = dp(8) })
         row.addView(speed, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         column.addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
-        addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(10) })
+        addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -249,21 +250,21 @@ class FileContent(context: Context) : LinearLayout(context) {
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        minimumWidth = dp(220)
-        setPadding(dp(10), dp(10), dp(12), dp(10))
+        minimumWidth = dp(248)
+        setPadding(dp(12), dp(12), dp(12), dp(12))
         tile.addView(glyph, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
         tile.addView(ring, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        addView(tile, LayoutParams(dp(44), dp(44)))
+        addView(tile, LayoutParams(dp(48), dp(48)))
         val column = LinearLayout(context).apply { orientation = VERTICAL }
         column.addView(name)
         column.addView(info, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
-        addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
+        addView(column, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12) })
     }
 
     fun bind(outgoing: Boolean, fileName: String, mime: String, sizeText: String, stage: TransferStage, progress: Float) {
         if (styled != outgoing) {
             styled = outgoing
-            tile.background = context.roundRect(if (outgoing) R.color.on_accent else R.color.accent_soft, 14).also {
+            tile.background = context.roundRect(if (outgoing) R.color.on_accent else R.color.accent_soft, Dimens.RADIUS_M).also {
                 if (outgoing) it.setColor(context.color(R.color.on_accent).withAlpha(0.22f))
             }
             glyph.setTint(if (outgoing) R.color.bubble_out_text else R.color.accent)
