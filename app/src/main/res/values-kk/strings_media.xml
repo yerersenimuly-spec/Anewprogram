@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="md_unsupported_message">Бұл хабарлама Line-ның осы нұсқасында ашылмайды</string>
+    <string name="md_preview_photo_caption">Фото: %1$s</string>
+</resources>
