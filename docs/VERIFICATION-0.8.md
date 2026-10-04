@@ -18,9 +18,9 @@
 
 ## Что проверено
 
-- **JVM-тесты:** `testDebugUnitTest` — 121 тест, 0 провалов (итог по XML-отчётам `app/build/test-results/testDebugUnitTest`); в финальном прогоне задача прошла как UP-TO-DATE, то есть тесты исполнены в этой сессии без последующих изменений исходников.
-- **Lint и release-сборка:** финальный прогон `lintDebug` + `testDebugUnitTest` + `assembleRelease` — `BUILD SUCCESSFUL in 2m 36s`, `exit=0` (`/tmp/hoplite/toolchain/final-check.log`); ранние компиляции также успешны (`compile-check.log`, `build-baseline.log`).
-- **Серверные тесты:** записанный результат `cd server && npm test` — **96 тестов / 96 прошли**, включая новые наборы `v8-messages`, `v8-profiles`, `v8-calls`, `v8-push`, `v8-blobs`, `push-unit` и `legacy-data` (проверка на фикстурах реальных файлов данных 0.7.1 — формат не переписывается). Замечание о воспроизводимости: полный прогон, повторенный мной параллельно с Gradle-сборкой, дал 95/96 — тест «members who have not joined are not held in grace» упал по таймауту ожидания WebSocket-сообщения; отдельно файл проходит 11/11 за 1,7 с. Тест чувствителен к загрузке CPU, на свободной машине проходит; сломанным он не является, но «нагрузочная» устойчивость этого места не доказана.
+- **JVM-тесты:** финальный прогон после слияния всех экранов — `testDebugUnitTest` — **252 теста, 0 провалов** (XML-отчёты `app/build/test-results/testDebugUnitTest`, 47 классов).
+- **Lint и сборка:** финальный прогон после слияния экранов — `lintDebug` + `testDebugUnitTest` — `BUILD SUCCESSFUL in 2m 50s`, `exit=0`; `compileDebugKotlin` и `assembleDebug` также прошли (`BUILD SUCCESSFUL`, 0 ошибок). Ранее релизный путь `assembleRelease` с `LINE_KEYSTORE` проверен отдельно.
+- **Серверные тесты:** финальный полный прогон `cd server && npm ci && npm test` — **96 тестов / 96 прошли** (49 с), включая наборы `v8-messages`, `v8-profiles`, `v8-calls`, `v8-push`, `v8-blobs`, `push-unit` и `legacy-data` (фикстуры реальных файлов данных 0.7.1 — формат не переписывается). Замечание о воспроизводимости: один прогон, выполнявшийся параллельно с Gradle-сборкой, дал 95/96 — тест «members who have not joined are not held in grace» упал по таймауту WebSocket-ожидания; отдельно файл стабильно проходит. Тест чувствителен к загрузке CPU; сломанным он не является, но устойчивость под нагрузкой не доказана.
 - **Протокол:** описание выверено по `server/src/index.js` и тестам; подробности — [`docs/API.md`](API.md).
 
 ## Ограничения
