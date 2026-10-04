@@ -46,7 +46,7 @@ class MediaDraft private constructor(
         /** Sanitised and cut on a character boundary to the wire limit, so a long caption is shortened instead of rejected. */
         fun caption(raw: String?): String? {
             val clean = AttachmentPayload.sanitizeCaption(raw) ?: return null
-            return truncateUtf8(clean, AttachmentPayload.MAX_CAPTION_BYTES).takeIf { it.isNotBlank() }
+            return truncateUtf8(clean.trim(), AttachmentPayload.MAX_CAPTION_BYTES).trim().takeIf { it.isNotEmpty() }
         }
 
         fun truncateUtf8(text: String, maxBytes: Int): String {

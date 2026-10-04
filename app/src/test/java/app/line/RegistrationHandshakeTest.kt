@@ -11,7 +11,7 @@ class RegistrationHandshakeTest {
         val bundle = JSONObject().put("identityKey", "public-identity")
         val handshake = RegistrationHandshake("installation-secret", bundle)
         val modern = handshake.packet()
-        assertEquals(7, modern.getInt("protocolVersion"))
+        assertEquals(RegistrationHandshake.CURRENT, modern.getInt("protocolVersion"))
         val legacy = handshake.retryForLegacy(error("registration_required"))!!
         assertEquals(setOf("type", "token", "bundle"), legacy.keys().asSequence().toSet())
         assertEquals(modern.getString("token"), legacy.getString("token"))
@@ -24,7 +24,7 @@ class RegistrationHandshakeTest {
         listOf("invalid_token", "invalid_bundle", "identity_mismatch", "blocked", "registration_disabled", "rate_limited").forEach { code ->
             val handshake = RegistrationHandshake("installation-secret", JSONObject())
             assertNull(handshake.retryForLegacy(error(code)))
-            assertEquals(7, handshake.protocolVersion)
+            assertEquals(RegistrationHandshake.CURRENT, handshake.protocolVersion)
         }
         val handshake = RegistrationHandshake("installation-secret", JSONObject())
         assertNull(handshake.retryForLegacy(error("registration_required").put("requestId", "lookup")))
