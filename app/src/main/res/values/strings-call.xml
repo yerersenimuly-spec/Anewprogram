@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calls_tab_recent">Недавние</string>
+    <string name="calls_tab_dial">Набор</string>
+    <string name="calls_empty_title">Пока нет звонков</string>
+    <string name="calls_empty_body">Здесь появятся ваши недавние звонки.</string>
+    <string name="calls_dial_hint">Введите номер</string>
+    <string name="calls_add_member">Добавить участника</string>
+    <string name="calls_delete_digit">Удалить цифру</string>
+    <string name="calls_call">Позвонить</string>
+    <string name="calls_again">Позвонить снова</string>
+    <string name="calls_incoming">Входящий звонок</string>
+    <string name="calls_outgoing">Исходящий звонок</string>
+    <string name="calls_missed">Пропущенный звонок</string>
+
+    <string name="call_status_outgoing">Вызов…</string>
+    <string name="call_status_connecting">Соединение…</string>
+    <string name="call_accept">Принять</string>
+    <string name="call_decline">Отклонить</string>
+    <string name="call_mute">Выключить микрофон</string>
+    <string name="call_unmute">Включить микрофон</string>
+    <string name="call_speaker_on">Включить громкую связь</string>
+    <string name="call_speaker_off">Отключить громкую связь</string>
+    <string name="call_minimize">Свернуть</string>
+    <string name="call_end">Завершить звонок</string>
+    <string name="call_reconnecting">Восстановление связи</string>
+
+    <string name="summary_completed">Разговор завершён</string>
+    <string name="summary_missed">Пропущенный звонок</string>
+    <string name="summary_declined">Звонок отклонён</string>
+    <string name="summary_cancelled">Звонок отменён</string>
+    <string name="summary_failed">Звонок не состоялся</string>
+    <string name="summary_direction_in">Входящий</string>
+    <string name="summary_direction_out">Исходящий</string>
+    <string name="summary_duration">Длительность</string>
+    <string name="summary_started">Начало</string>
+    <string name="summary_write">Написать</string>
+
+    <string name="admin_title">Администрирование</string>
+    <string name="admin_code_hint">Секретный код</string>
+    <string name="admin_code_short">Код содержит не менее 12 символов</string>
+    <string name="admin_login">Войти</string>
+    <string name="admin_session_note">Сессия действует 5 минут и закрывается при выходе из приложения.</string>
+    <string name="admin_session_over">Сессия администратора завершена</string>
+    <string name="admin_metrics">В сети: %1$d · Аккаунтов: %2$d · Звонков: %3$d</string>
+    <string name="admin_refresh">Обновить</string>
+    <string name="admin_settings">Правила сервиса</string>
+    <string name="admin_calls">Разрешить звонки</string>
+    <string name="admin_chats">Разрешить сообщения</string>
+    <string name="admin_registration">Разрешить новые аккаунты</string>
+    <string name="admin_max_participants">Максимум участников</string>
+    <string name="admin_blocked">Заблокированные номера</string>
+    <string name="admin_block_hint">Номер для блокировки</string>
+    <string name="admin_block">Заблокировать</string>
+    <string name="admin_unblock">Разблокировать</string>
+    <string name="admin_blocked_empty">Нет заблокированных номеров</string>
+    <string name="admin_calls_active">Активные звонки</string>
+    <string name="admin_no_calls">Нет активных звонков</string>
+    <string name="admin_call_title">Звонок</string>
+    <string name="admin_participants">Участников: %1$d</string>
+    <string name="admin_end_call">Завершить</string>
+    <string name="admin_logout">Выйти</string>
+    <string name="admin_confirm_block_title">Заблокировать номер?</string>
+    <string name="admin_confirm_block_body">Аккаунт потеряет доступ к серверу, его переписка и вложения будут удалены.</string>
+    <string name="admin_confirm_end_title">Завершить этот звонок?</string>
+    <string name="admin_confirm_end_body">Разговор завершится для всех участников.</string>
+</resources>

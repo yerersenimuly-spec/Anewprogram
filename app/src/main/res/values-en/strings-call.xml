@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calls_tab_recent">Recent</string>
+    <string name="calls_tab_dial">Dial</string>
+    <string name="calls_empty_title">No calls yet</string>
+    <string name="calls_empty_body">Your recent calls will appear here.</string>
+    <string name="calls_dial_hint">Enter a number</string>
+    <string name="calls_add_member">Add participant</string>
+    <string name="calls_delete_digit">Delete digit</string>
+    <string name="calls_call">Call</string>
+    <string name="calls_again">Call again</string>
+    <string name="calls_incoming">Incoming call</string>
+    <string name="calls_outgoing">Outgoing call</string>
+    <string name="calls_missed">Missed call</string>
+
+    <string name="call_status_outgoing">Calling…</string>
+    <string name="call_status_connecting">Connecting…</string>
+    <string name="call_accept">Accept</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_unmute">Unmute</string>
+    <string name="call_speaker_on">Turn on speaker</string>
+    <string name="call_speaker_off">Turn off speaker</string>
+    <string name="call_minimize">Minimize</string>
+    <string name="call_end">End call</string>
+    <string name="call_reconnecting">Reconnecting</string>
+
+    <string name="summary_completed">Call finished</string>
+    <string name="summary_missed">Missed call</string>
+    <string name="summary_declined">Call declined</string>
+    <string name="summary_cancelled">Call cancelled</string>
+    <string name="summary_failed">Call did not go through</string>
+    <string name="summary_direction_in">Incoming</string>
+    <string name="summary_direction_out">Outgoing</string>
+    <string name="summary_duration">Duration</string>
+    <string name="summary_started">Started</string>
+    <string name="summary_write">Message</string>
+
+    <string name="admin_title">Administration</string>
+    <string name="admin_code_hint">Secret code</string>
+    <string name="admin_code_short">The code has at least 12 characters</string>
+    <string name="admin_login">Sign in</string>
+    <string name="admin_session_note">The session lasts 5 minutes and closes when you leave the app.</string>
+    <string name="admin_metrics">Online: %1$d · Accounts: %2$d · Calls: %3$d</string>
+    <string name="admin_refresh">Refresh</string>
+    <string name="admin_settings">Service rules</string>
+    <string name="admin_calls">Allow calls</string>
+    <string name="admin_chats">Allow messages</string>
+    <string name="admin_registration">Allow new accounts</string>
+    <string name="admin_max_participants">Maximum participants</string>
+    <string name="admin_blocked">Blocked numbers</string>
+    <string name="admin_block_hint">Number to block</string>
+    <string name="admin_block">Block</string>
+    <string name="admin_unblock">Unblock</string>
+    <string name="admin_blocked_empty">No blocked numbers</string>
+    <string name="admin_calls_active">Active calls</string>
+    <string name="admin_no_calls">No active calls</string>
+    <string name="admin_call_title">Call</string>
+    <string name="admin_participants">%1$d participants</string>
+    <string name="admin_end_call">End</string>
+    <string name="admin_logout">Sign out</string>
+    <string name="admin_session_over">Admin session has ended</string>
+    <string name="admin_confirm_block_title">Block this number?</string>
+    <string name="admin_confirm_block_body">The account will lose access to the server; its messages and files will be removed.</string>
+    <string name="admin_confirm_end_title">End this call?</string>
+    <string name="admin_confirm_end_body">The conversation will end for all participants.</string>
+</resources>
