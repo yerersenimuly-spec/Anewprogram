@@ -239,7 +239,7 @@ class OnboardingScreen : Screen() {
         })
         view.body.text = when (phase) {
             ConnectPhase.OFFLINE -> str(R.string.cp_ob_offline_body)
-            ConnectPhase.FAILED -> str(R.string.cp_ob_failed_body, hostName)
+            ConnectPhase.FAILED -> str(R.string.cp_ob_failed_body)
             else -> hostName
         }
         view.retry.visibility = if (phase == ConnectPhase.FAILED) View.VISIBLE else View.GONE

@@ -171,7 +171,7 @@ class CallSummaryScreen(private val summary: CallSummary) : Screen() {
         }
         val buttons = context.row {
             addView(context.primaryButton(str(primaryLabel)) { callAgain() }, LinearLayout.LayoutParams(0, WRAP, 1.3f))
-            if (model.canMessage) addView(glassButton(str(R.string.cp_message)) { message() },
+            if (model.canMessage) addView(glassButton(str(R.string.cp_action_message)) { message() },
                 LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = context.dp(12) })
         }
         actions.addView(buttons, LinearLayout.LayoutParams(MATCH, WRAP))

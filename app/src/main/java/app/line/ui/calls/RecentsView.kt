@@ -134,8 +134,8 @@ class RecentsView(context: Context, private val callbacks: Callbacks) : FrameLay
         }
 
         private fun headerText(item: RecentItem.Header): String = when (item.label) {
-            DayLabel.TODAY -> context.getString(R.string.date_today)
-            DayLabel.YESTERDAY -> context.getString(R.string.date_yesterday)
+            DayLabel.TODAY -> context.getString(R.string.cp_today)
+            DayLabel.YESTERDAY -> context.getString(R.string.cp_yesterday)
             DayLabel.OTHER -> {
                 date.time = item.timestamp
                 val year = java.util.Calendar.getInstance().apply { time = date }.get(java.util.Calendar.YEAR)

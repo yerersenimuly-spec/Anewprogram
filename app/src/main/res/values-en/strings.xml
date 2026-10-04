@@ -15,7 +15,7 @@
 
     <string name="banner_waiting_network">Waiting for network</string>
     <string name="banner_connecting">Connecting…</string>
-    <string name="banner_unsent">Not sent: %1$d</string>
+    <string name="banner_unsent">Waiting to send: %1$d</string>
     <string name="return_to_call">Call in progress · return</string>
 
     <string name="status_pending">Waiting to send</string>
@@ -43,13 +43,13 @@
     <string name="notice_call_media_lost">Connection lost</string>
     <string name="notice_call_media_failed">Couldn’t establish a secure connection</string>
     <string name="notice_call_secure_failed">Secure connection failed. Verify security codes.</string>
-    <string name="notice_call_protocol">Call protocol error</string>
+    <string name="notice_call_protocol">Call failed. Try again.</string>
     <string name="notice_call_unavailable">Contact unavailable</string>
     <string name="notice_calls_disabled">Calls are disabled by the administrator</string>
-    <string name="notice_mic_required">No microphone access</string>
+    <string name="notice_mic_required">No microphone access. Allow it in settings.</string>
     <string name="notice_replaced">Account opened on another device</string>
-    <string name="notice_message_rejected">Message rejected</string>
-    <string name="notice_server_message_rejected">Server message rejected</string>
+    <string name="notice_message_rejected">Message not accepted</string>
+    <string name="notice_server_message_rejected">Invalid server response</string>
     <string name="notice_operation_failed">Failed. Check your network and security code.</string>
 
     <string name="chats_empty_title">No chats yet</string>

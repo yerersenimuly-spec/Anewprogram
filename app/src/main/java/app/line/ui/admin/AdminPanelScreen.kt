@@ -2,19 +2,20 @@ package app.line.ui.admin
 
 import android.content.Context
 import android.os.SystemClock
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.line.CallService
 import app.line.CallState
 import app.line.ConnectionProfile
 import app.line.R
 import app.line.core.NumberInput
 import app.line.ui.*
 import app.line.ui.calls.CallFormat
+import app.line.ui.profile.switchRow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -40,7 +41,7 @@ class AdminPanelScreen : Screen() {
         val root = context.column()
         bar = TopBar(context).back(str(R.string.back)) { leave() }.setTitle(str(R.string.cp_admin_title))
         bar.action("refresh", str(R.string.cp_refresh)) { load() }
-        bar.action("lock", str(R.string.cp_admin_sign_out)) { host.service?.lockAdmin(); leave() }
+        bar.action("lock", str(R.string.cp_admin_sign_out)) { host.service?.lockAdmin(); AdminSession.expiresAt = 0; leave() }
         root.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
         body = context.column { setPadding(0, 0, 0, context.dp(32)) }
         root.addView(ScrollView(context).apply {
@@ -60,24 +61,23 @@ class AdminPanelScreen : Screen() {
         if (busy) return
         loadFailed = false
         if (status == null) renderLoading()
-        exec { value ->
-            val parsed = AdminStatus.parse(host.service!!.adminCommand("status"))
+        exec { service ->
+            val parsed = AdminStatus.parse(service.adminCommand("status"))
             status = parsed
             edited = parsed.settings
             render()
-            value
         }
     }
 
     /** One command at a time; failures are shown in the interface language and an expired session closes the panel. */
-    private fun exec(block: suspend (Unit) -> Unit) {
+    private fun exec(block: suspend (CallService) -> Unit) {
         val service = host.service ?: return
         if (busy) return
         busy = true
         host.uiScope.launch {
             try {
                 if (!service.isAdmin()) throw IllegalStateException("Войдите в админ-панель заново")
-                block(Unit)
+                block(service)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -93,9 +93,9 @@ class AdminPanelScreen : Screen() {
         }
     }
 
-    private fun command(action: String, extra: JSONObject = JSONObject()) = exec {
-        host.service!!.adminCommand(action, extra)
-        val parsed = AdminStatus.parse(host.service!!.adminCommand("status"))
+    private fun command(action: String, extra: JSONObject = JSONObject()) = exec { service ->
+        service.adminCommand(action, extra)
+        val parsed = AdminStatus.parse(service.adminCommand("status"))
         status = parsed; edited = parsed.settings
         render()
     }

@@ -158,7 +158,7 @@ class ProfileSheets(private val host: Host, private val onChanged: () -> Unit) {
             val exempt = ignoringBatteryOptimizations()
             body.addView(ListRow(context).apply {
                 title.text = str(R.string.cp_battery)
-                subtitle(str(if (exempt) R.string.cp_battery_on else R.string.cp_battery_off))
+                subtitle(str(if (exempt) R.string.cp_battery_free else R.string.cp_battery_limited))
                 leading(null)
                 trailing(context.icon("chevron_right", R.color.text_tertiary, 20))
                 onClick { openBatterySettings(exempt) }

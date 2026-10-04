@@ -15,7 +15,7 @@
 
     <string name="banner_waiting_network">Ожидание сети</string>
     <string name="banner_connecting">Подключение…</string>
-    <string name="banner_unsent">Не отправлено: %1$d</string>
+    <string name="banner_unsent">Ожидает отправки: %1$d</string>
     <string name="return_to_call">Идёт звонок · вернуться</string>
 
     <string name="status_pending">Ожидает отправки</string>
@@ -43,13 +43,13 @@
     <string name="notice_call_media_lost">Связь потеряна</string>
     <string name="notice_call_media_failed">Не удалось установить защищённое соединение</string>
     <string name="notice_call_secure_failed">Сбой защищённого соединения. Сверьте коды безопасности.</string>
-    <string name="notice_call_protocol">Ошибка протокола звонка</string>
+    <string name="notice_call_protocol">Звонок не удался. Попробуйте ещё раз.</string>
     <string name="notice_call_unavailable">Абонент недоступен</string>
     <string name="notice_calls_disabled">Звонки отключены администратором</string>
-    <string name="notice_mic_required">Нет доступа к микрофону</string>
+    <string name="notice_mic_required">Нет доступа к микрофону. Разрешите его в настройках.</string>
     <string name="notice_replaced">Аккаунт открыт на другом устройстве</string>
-    <string name="notice_message_rejected">Сообщение отклонено</string>
-    <string name="notice_server_message_rejected">Сообщение сервера отклонено</string>
+    <string name="notice_message_rejected">Сообщение не принято</string>
+    <string name="notice_server_message_rejected">Некорректный ответ сервера</string>
     <string name="notice_operation_failed">Не удалось выполнить. Проверьте сеть и код безопасности.</string>
 
     <string name="chats_empty_title">Пока нет чатов</string>

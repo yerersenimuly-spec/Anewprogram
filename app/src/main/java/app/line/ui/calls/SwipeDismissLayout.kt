@@ -23,7 +23,7 @@ class SwipeDismissLayout(context: Context, private val content: View, private va
     private var dragging = false
     private var tracker: VelocityTracker? = null
 
-    init { addView(content, LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
+    init { addView(content, LayoutParams(app.line.ui.MATCH, app.line.ui.MATCH)) }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
