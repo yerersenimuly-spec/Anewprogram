@@ -1,0 +1,11 @@
+{
+  "name": "line-android",
+  "version": "0.7.1",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix server start",
+    "test": "npm --prefix server test",
+    "setup": "bash scripts/setup.sh",
+    "android:check": "./gradlew assembleDebug testDebugUnitTest lintDebug"
+  }
+}

@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Android and local signaling identities
+.gradle/
+.kotlin/
+.android-sdk/
+.tools/
+local.properties
+**/build/
+server/data/
+.env
+*.keystore
+*.jks
+artifacts/
+.hoplite/attachments/
+.hoplite/runtime/
+app/src/debug/AndroidManifest.xml
+app/src/debug/res/xml/local_test_security.xml
+app/src/debug/res/raw/local_test_ca.pem
