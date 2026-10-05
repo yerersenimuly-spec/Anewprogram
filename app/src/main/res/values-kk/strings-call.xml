@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calls_tab_recent">Соңғылар</string>
+    <string name="calls_tab_dial">Теру</string>
+    <string name="calls_empty_title">Әзірге қоңыраулар жоқ</string>
+    <string name="calls_empty_body">Соңғы қоңырауларыңыз осында көрінеді.</string>
+    <string name="calls_dial_hint">Нөмірді енгізіңіз</string>
+    <string name="calls_add_member">Қатысушыны қосу</string>
+    <string name="calls_delete_digit">Санды өшіру</string>
+    <string name="calls_call">Қоңырау шалу</string>
+    <string name="calls_again">Қайта қоңырау шалу</string>
+    <string name="calls_incoming">Кіріс қоңырау</string>
+    <string name="calls_outgoing">Шығыс қоңырау</string>
+    <string name="calls_missed">Өткізіп алған қоңырау</string>
+
+    <string name="call_status_outgoing">Қоңырау шығарылуда…</string>
+    <string name="call_status_connecting">Байланыс орнатылуда…</string>
+    <string name="call_accept">Қабылдау</string>
+    <string name="call_decline">Қабылдамау</string>
+    <string name="call_mute">Микрофонды өшіру</string>
+    <string name="call_unmute">Микрофонды қосу</string>
+    <string name="call_speaker_on">Динамикті қосу</string>
+    <string name="call_speaker_off">Динамикті өшіру</string>
+    <string name="call_minimize">Жию</string>
+    <string name="call_end">Қоңырауды аяқтау</string>
+    <string name="call_reconnecting">Байланыс қалпына келтірілуде</string>
+
+    <string name="summary_completed">Әңгіме аяқталды</string>
+    <string name="summary_missed">Өткізіп алған қоңырау</string>
+    <string name="summary_declined">Қоңырау қабылданбады</string>
+    <string name="summary_cancelled">Қоңырау тоқтатылды</string>
+    <string name="summary_failed">Қоңырау сәтсіз аяқталды</string>
+    <string name="summary_direction_in">Кіріс</string>
+    <string name="summary_direction_out">Шығыс</string>
+    <string name="summary_duration">Ұзақтығы</string>
+    <string name="summary_started">Басталды</string>
+    <string name="summary_write">Жазу</string>
+
+    <string name="admin_title">Әкімшілік</string>
+    <string name="admin_code_hint">Құпия код</string>
+    <string name="admin_code_short">Код кемінде 12 таңбадан тұрады</string>
+    <string name="admin_login">Кіру</string>
+    <string name="admin_session_note">Сессия 5 минут жұмыс істейді және қосымшадан шыққанда жабылады.</string>
+    <string name="admin_metrics">Желідегі: %1$d · Аккаунттар: %2$d · Қоңыраулар: %3$d</string>
+    <string name="admin_refresh">Жаңарту</string>
+    <string name="admin_settings">Сервис ережелері</string>
+    <string name="admin_calls">Қоңырауларға рұқсат ету</string>
+    <string name="admin_chats">Хабарламаларға рұқсат ету</string>
+    <string name="admin_registration">Жаңа аккаунттарға рұқсат ету</string>
+    <string name="admin_max_participants">Қатысушылардың максималды саны</string>
+    <string name="admin_blocked">Бұғатталған нөмірлер</string>
+    <string name="admin_block_hint">Бұғаттауға арналған нөмір</string>
+    <string name="admin_block">Бұғаттау</string>
+    <string name="admin_unblock">Бұғаттан шығару</string>
+    <string name="admin_blocked_empty">Бұғатталған нөмірлер жоқ</string>
+    <string name="admin_calls_active">Белсенді қоңыраулар</string>
+    <string name="admin_no_calls">Белсенді қоңыраулар жоқ</string>
+    <string name="admin_call_title">Қоңырау</string>
+    <string name="admin_participants">Қатысушылар: %1$d</string>
+    <string name="admin_end_call">Аяқтау</string>
+    <string name="admin_logout">Шығу</string>
+    <string name="admin_session_over">Әкімші сессиясы аяқталды</string>
+    <string name="admin_confirm_block_title">Бұл нөмірді бұғаттау керек пе?</string>
+    <string name="admin_confirm_block_body">Аккаунт серверге қол жеткізуді жоғалтады, хабарламалары мен файлдары өшіріледі.</string>
+    <string name="admin_confirm_end_title">Бұл қоңырауды аяқтау керек пе?</string>
+    <string name="admin_confirm_end_body">Әңгіме барлық қатысушы үшін аяқталады.</string>
+</resources>

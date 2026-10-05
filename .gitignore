@@ -40,3 +40,5 @@ artifacts/
 app/src/debug/AndroidManifest.xml
 app/src/debug/res/xml/local_test_security.xml
 app/src/debug/res/raw/local_test_ca.pem
+keystore.properties
+.hoplite/signing/

@@ -1,0 +1,89 @@
+{
+  "version": 2,
+  "identities": {
+    "3138bb9bc78df27c473ecfd1410f7bd45ebac1f59cf3ff9cfe4db77aab7aedd3": {
+      "number": "69938944",
+      "bundle": {
+        "identityKey": "aWRlbnRpdHktMTE=",
+        "registrationId": 11,
+        "signedPreKey": {
+          "id": 11,
+          "publicKey": "c2lnbmVkLXB1YmxpYy0xMQ==",
+          "signature": "c2lnbmVkLXNpZ25hdHVyZS0xMQ=="
+        },
+        "kyberPreKey": {
+          "id": 10011,
+          "publicKey": "a3liZXItcHVibGljLTEx",
+          "signature": "a3liZXItc2lnbmF0dXJlLTEx"
+        },
+        "preKeys": [
+          {
+            "id": 1100,
+            "publicKey": "b25lLXRpbWUtMTEtMA=="
+          },
+          {
+            "id": 1101,
+            "publicKey": "b25lLXRpbWUtMTEtMQ=="
+          }
+        ]
+      },
+      "preKeyFloor": -1
+    },
+    "4f2e8d65483c641648cdb374ae9d8abd368d269e4ddffe092a8237b8162cddd6": {
+      "number": "53232342",
+      "bundle": {
+        "identityKey": "aWRlbnRpdHktMTI=",
+        "registrationId": 12,
+        "signedPreKey": {
+          "id": 12,
+          "publicKey": "c2lnbmVkLXB1YmxpYy0xMg==",
+          "signature": "c2lnbmVkLXNpZ25hdHVyZS0xMg=="
+        },
+        "kyberPreKey": {
+          "id": 10012,
+          "publicKey": "a3liZXItcHVibGljLTEy",
+          "signature": "a3liZXItc2lnbmF0dXJlLTEy"
+        },
+        "preKeys": [
+          {
+            "id": 1200,
+            "publicKey": "b25lLXRpbWUtMTItMA=="
+          },
+          {
+            "id": 1201,
+            "publicKey": "b25lLXRpbWUtMTItMQ=="
+          }
+        ]
+      },
+      "preKeyFloor": -1
+    },
+    "79bd7d7fd684b399857c582b1b7172ddf277d4fe1b027ec52b28da3ae381e675": {
+      "number": "63308206",
+      "bundle": {
+        "identityKey": "aWRlbnRpdHktMTM=",
+        "registrationId": 13,
+        "signedPreKey": {
+          "id": 13,
+          "publicKey": "c2lnbmVkLXB1YmxpYy0xMw==",
+          "signature": "c2lnbmVkLXNpZ25hdHVyZS0xMw=="
+        },
+        "kyberPreKey": {
+          "id": 10013,
+          "publicKey": "a3liZXItcHVibGljLTEz",
+          "signature": "a3liZXItc2lnbmF0dXJlLTEz"
+        },
+        "preKeys": [
+          {
+            "id": 1300,
+            "publicKey": "b25lLXRpbWUtMTMtMA=="
+          },
+          {
+            "id": 1301,
+            "publicKey": "b25lLXRpbWUtMTMtMQ=="
+          }
+        ]
+      },
+      "preKeyFloor": -1
+    }
+  }
+}

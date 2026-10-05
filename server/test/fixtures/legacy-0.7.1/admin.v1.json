@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "settings": {
+    "callsEnabled": true,
+    "chatEnabled": true,
+    "registrationEnabled": true,
+    "maxParticipants": 6
+  },
+  "blockedNumbers": [
+    "63308206"
+  ]
+}

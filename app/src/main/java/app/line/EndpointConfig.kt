@@ -18,8 +18,8 @@ data class EndpointConfig(val apiUrl: String, val apiPins: String, val mediaUrl:
         pins(apiPins).forEach { pinner.add(URI(apiUrl).host, it) }
         pins(mediaPins).forEach { pinner.add(URI(mediaUrl).host, it) }
         return OkHttpClient.Builder().certificatePinner(pinner.build())
-            .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
-            .pingInterval(15, TimeUnit.SECONDS).build()
+            .connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS).retryOnConnectionFailure(true).build()
     }
 
     companion object {

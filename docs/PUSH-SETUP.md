@@ -1,45 +1,110 @@
-# Android push setup
+# Push-уведомления Line: UnifiedPush и необязательный APNs
 
-The signaling service can send Firebase Cloud Messaging (FCM) data-only wake-up hints for queued messages and incoming calls. FCM is optional: the encrypted-message mailbox works without Firebase, but push cannot wake an Android installation until both server credentials and the matching client integration are configured. Configure/import the Android app's public Firebase settings as described in [`ANDROID-PUSH.md`](ANDROID-PUSH.md); the server service-account key is separate and must never be imported by the app.
+Сервер больше не использует Firebase. Чтобы сообщение или звонок разбудили приложение, у телефона должен быть **дистрибьютор UnifiedPush** (например, приложение ntfy), а сервер отправляет ему короткую подсказку «переподключись». Сообщения, номера и имена в подсказке не передаются: приложение просыпается, подключается к `/signal` и забирает всё из почтового ящика. Без push приложение работает, пока держит соединение, а ждущие сообщения лежат на сервере до 7 суток.
 
-## 1. Configure Firebase
+Формат протокола — в [`API.md`](API.md) (раздел 3.4), клиентская часть — в `app/src/main/java/app/line/push`.
 
-1. In Firebase Console, create or select the Firebase project for this Android app and add an Android app with the package ID `app.line`.
-2. In **Project settings → Cloud Messaging**, enable the Firebase Cloud Messaging API.
-3. Create a dedicated service account for the signaling backend. Grant it the **Firebase Cloud Messaging API Admin** role on the target Firebase project. Do not put its key in the Android app.
-4. Create a JSON key and copy it directly to a protected file on the backend host, for example `/etc/line/fcm-service-account.json`. Set its owner to the API service user and permissions to `0600`. Keep it outside the repository, backups shared with clients, and application images.
+## 1. Как это устроено
 
-The server uses the official Firebase Admin SDK for Node.js (`firebase-admin` is pinned in `server/package.json`). Firebase's Admin SDK sends through the FCM HTTP v1 API; see [Firebase Admin SDK send](https://firebase.google.com/docs/cloud-messaging/send/admin-sdk).
-
-## 2. Configure the signaling service
-
-Set both variables in the server's protected environment file (for example `/etc/line/api.env`):
-
-```ini
-FCM_PROJECT_ID=your-firebase-project-id
-GOOGLE_APPLICATION_CREDENTIALS=/etc/line/fcm-service-account.json
+```text
+ телефон                                  ваш VPS                              ваш VPS (или чужой)
+┌────────────────┐  1. endpoint   ┌────────────────────┐  3. POST на endpoint  ┌───────────────────┐
+│ Line           │ ─────────────► │ API Line           │ ────────────────────► │ сервер ntfy       │
+│  ▲             │  push_register │ (Node, /signal)    │  TTL, Urgency: high,  │ ntfy.example.org  │
+│  │ 5. будит    │                │ push-endpoints.json│  тело по RFC 8291     └─────────┬─────────┘
+│ ┌┴───────────┐ │                └─────────┬──────────┘                                 │ 4. держит
+│ │ ntfy       │◄┼──────────────────────────┼────────────────────────────────────────────┘    соединение
+│ │ (дистрибь- │ │   2. адресат не в сети: сообщение / звонок / конец звонка
+│ │  ютор)     │ │
+│ └────────────┘ │   6. Line подключается к wss://api.example.org/signal и забирает почту
+└────────────────┘
 ```
 
-Restart the existing signaling service using its normal deployment procedure. No new API host or public endpoint is required. The service validates the credential file at startup. Leave **both** variables unset to disable FCM while retaining the persistent mailbox; setting only one or supplying an invalid credential file prevents startup rather than silently claiming push is available.
+1. Line просит дистрибьютора адрес и получает `endpoint` (`https://ntfy.example.org/up…`), а при поддержке шифрования — ключи `pubKey` и `auth`. Клиент отправляет их серверу сообщением `push_register`; сервер хранит одну регистрацию на номер в `push-endpoints.json`.
+2. Когда адресат не в сети, сервер отправляет POST на его `endpoint`. Если есть ключи, тело зашифровано (RFC 8291, `aes128gcm`); иначе это открытый JSON.
+3. Содержимое подсказки — только `{"kind":"message"|"call"|"call_ended","id":"<uuid>"}` (у `call_ended` ещё необязательное `reason`).
+4. Дистрибьютор доставляет подсказку приложению, оно подключается к серверу и дальше всё идёт обычным путём: сообщения, `delivery_ack`, звонок.
 
-FCM registration tokens are stored in `PUSH_TOKEN_FILE` (default `${DATA_FILE}.push.json`) with atomic replacement and mode `0600`. Treat this file and its backups as credentials. Push registration is per account and is cleared when that account is blocked. The Firebase private key and FCM tokens must never be committed, copied into an APK, printed to logs, or pasted into support messages.
+Подсказки о сообщениях для одного номера не чаще раза в 1,5 секунды; подсказки о звонках не объединяются. Служебные конверты (квитанции о прочтении, `silent: true`) push не вызывают.
 
-## 3. Version-7 Android client contract
+## 2. Свой ntfy на том же VPS за Caddy
 
-The server changes in this release are backend-only. The Android client must also integrate Firebase Messaging before users can see OS notifications:
+Ниже только примеры конфигурации: ничего на реальном сервере они не меняют, пока вы сами не примените их.
 
-1. Obtain the FCM registration token using the Android Firebase Messaging SDK (`FirebaseMessaging.getToken()`), not the shorter Firebase Installation ID (FID), and refresh it when Firebase rotates it. The signaling service accepts registration tokens from 25 to 4,096 bytes and rejects whitespace.
-2. After registering its normal authenticated signaling session with `protocolVersion: 7`, send `{ "type": "push_register", "token": "<FCM token>" }` over `/signal`. The server binds the token to that session's account; a client cannot set another account's token.
-3. Handle generic FCM `data` payloads in the app and post an appropriate local notification. The only payload fields are `kind` and `id`: `message` identifies a queued envelope, `call` identifies an incoming call, and `call_ended` asks the client to dismiss an ended incoming-call notification. Payloads deliberately omit message text, sender numbers, and call authorization data.
-4. For a message wake-up, reconnect to `/signal`, receive queued `envelope` events, decrypt locally, save the message, and only then send `{ "type": "delivery_ack", "id": "<message-uuid>" }`. After verifying a peer, request `{ "type": "inbox_sync" }` to retrieve any ciphertext the client previously deferred; process the serial WebSocket event queue through `{ "type": "inbox_complete" }` before reporting the inbox synchronized. The server keeps ciphertext until acknowledgement or the seven-day TTL. Delivery is at-least-once, so deduplicate by message ID.
-5. For a call wake-up, reconnect within the 45-second ringing window, receive the pending `incoming` event, and use the normal authenticated `join_call` flow. FCM is only a wake-up hint; it does not recreate calls after a signaling-process restart or bypass LiveKit authorization. A `call_ended` hint dismisses a stale incoming-call notification.
+1. DNS: запись `ntfy.<ваш-домен>` на тот же IP, что и `api.<домен>`.
+2. Установите ntfy из [официальной инструкции](https://docs.ntfy.sh/install/) (пакет для Ubuntu или Docker-образ) и положите конфигурацию из [`deploy/ntfy-server.yml.example`](../deploy/ntfy-server.yml.example) в `/etc/ntfy/server.yml`. Главное в ней: `base-url` — точный публичный HTTPS-адрес, `listen-http: "127.0.0.1:2586"`, `behind-proxy: true`.
+3. Добавьте в `Caddyfile` блок (он есть закомментированным в [`deploy/Caddyfile`](../deploy/Caddyfile)) и перезагрузите Caddy; сертификат он получит сам:
 
-The version-7 signaling registration response includes `pushEnabled`, and a successful token update returns `{ "type": "push_registered", "pushEnabled": true }`. `pushEnabled: false` means the server has no usable push configuration/token. Version-6 clients retain the legacy `sent` response but do not acknowledge recipient delivery; update both app installations to protocol version 7 to use delivery receipts and clean up queued ciphertext promptly.
+   ```text
+   ntfy.example.org {
+       reverse_proxy 127.0.0.1:2586
+   }
+   ```
 
-## Delivery and privacy notes
+4. Запустите ntfy как systemd-сервис (`systemctl enable --now ntfy`) и проверьте `https://ntfy.<домен>/v1/health` — ответ содержит `"healthy":true`.
+5. Лимиты ntfy считаются «на посетителя», а API Line отправляет все подсказки с одного адреса — самого VPS. Укажите его в `visitor-request-limit-exempt-hosts`, иначе при росте числа пользователей ntfy начнёт отвечать `429`. Если API и ntfy на разных серверах, исключите адрес API-сервера.
+6. Доступ. По умолчанию ntfy открыт для всех: темы UnifiedPush — длинные случайные строки, которые создаёт телефон, адрес темы служит секретом. Чтобы закрыть сервер, включите `auth-file` и `auth-default-access: "deny-all"`, создайте пользователя (`ntfy user add <имя>`), добавьте его в приложении ntfy на телефоне и выдайте всем запись в темы `up*`, потому что сервер Line не имеет учётной записи в ntfy: `ntfy access '*' 'up*' write-only`. Точные команды сверяйте с документацией вашей версии ntfy.
+7. На телефоне: установите приложение ntfy (F-Droid, Google Play или APK с сайта проекта), в **Настройки → Сервер по умолчанию** введите `https://ntfy.<домен>`, затем в настройках Line выберите ntfy дистрибьютором UnifiedPush. Разрешите ntfy работу в фоне и исключите его из экономии заряда.
 
-- Messages are ciphertext-only in the durable mailbox. FCM never receives their ciphertext, plaintext, sender, or recipient number.
-- Offline message pushes use high priority and have a 24-hour FCM TTL. Offline call pushes use high priority and a 45-second TTL. FCM delivery is best-effort, not a substitute for retrying the authenticated WebSocket connection.
-- Android decides how notifications are displayed and whether they are visible on the lock screen. Configure notification channels and privacy-safe notification text in the client; do not put plaintext chat content in push payloads.
-- The server stores account-bound FCM tokens in a separate `0600` file and removes tokens rejected by FCM as invalid/unregistered. Other provider errors are intentionally not logged with token or message data.
-- No live Firebase credentials are part of the backend test suite. The tests inject a push sender to verify payload minimization, queueing, offline-call wake-ups, TTLs, and token ownership without sending a real notification.
+Внешний ntfy.sh тоже годится как дистрибьютор, но тогда адреса подсказок и время их отправки видит его оператор; свой сервер оставляет эти данные у вас.
+
+Сервер Line обращается к `https://ntfy.<домен>` по обычному публичному адресу, поэтому `PUSH_ALLOW_PRIVATE_ENDPOINTS` включать не нужно. Если VPS не может открыть соединение со своим же публичным адресом (редкая настройка NAT), проверьте это командой `curl -I https://ntfy.<домен>/v1/health` с самого VPS.
+
+## 3. Настройка сервера Line
+
+Ничего нового задавать не обязательно: UnifiedPush включён всегда, существующее окружение `/etc/line/api.env` остаётся как есть. Необязательные переменные (подробнее — в [`API.md`](API.md), раздел 7):
+
+| Переменная | Значение |
+| --- | --- |
+| `PUSH_ENDPOINT_FILE` | файл push-регистраций, по умолчанию `${DATA_FILE}.push-endpoints.json`, права `0600`, создаётся при первой регистрации |
+| `PUSH_ALLOW_PRIVATE_ENDPOINTS` | `true` разрешает `endpoint` на частных адресах и без точки в имени (только для закрытой сети; по умолчанию выключено) |
+| `APNS_KEY_FILE`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC` | включают APNs (раздел 6); только все четыре сразу |
+| `FCM_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS` | **игнорируются**; можно оставить в окружении |
+
+Файл `${DATA_FILE}.push.json` со старыми FCM-токенами сервер не читает, не меняет и не удаляет. Он нужен только для отката на 0.7.1.
+
+Что проверяет сервер у каждого `endpoint`: только `https`, без логина и пароля, не длиннее 2048 символов, публичный хост. Перед каждой отправкой имя разрешается в адрес собственной функцией DNS, и соединение открывается ровно на проверенный адрес; адреса из частных, loopback, link-local, CGNAT, ULA, мультикаст и документационных диапазонов запрещены. Редиректы не выполняются, таймаут 5 секунд, тело не больше 4 KiB, один повтор через секунду. Ответ `404` или `410` удаляет регистрацию.
+
+## 4. Контракт клиента (протокол 8)
+
+1. После `registered` с `pushProviders`, содержащим `unifiedpush`, клиент отправляет `push_register` `{ provider: "unifiedpush", endpoint, pubKey?, auth? }` и ждёт `push_registered` `{ pushEnabled: true, provider }`. Повторять нужно при смене `endpoint`, после переустановки или смене дистрибьютора; при каждом подключении без изменений регистрацию отправлять не требуется.
+2. `push_unregister` снимает регистрацию, например при выходе или отказе от push.
+3. Подсказка читается по одному правилу: JSON ровно с полями `kind` и `id` (и `reason` у `call_ended`). На `message` — подключиться и забрать почту, на `call` — подключиться и показать входящий звонок, на `call_ended` — убрать уведомление о звонке.
+4. Подсказка — только намёк. Содержимое и авторизацию звонка клиент получает по `/signal`.
+
+## 5. Приватность
+
+- В подсказке нет номеров, имён, текста и ключей: только тип события и идентификатор конверта или звонка (UUID).
+- Если дистрибьютор передал ключи, тело зашифровано: сервер ntfy видит адрес темы, момент и размер, но не `kind` и `id`. Без ключей уходит открытый JSON, и оператор ntfy видит эти два поля.
+- Дистрибьютор и его сервер знают, что у какого-то устройства появилась подсказка и когда; связать её с номером Line они не могут, пока не знают, чья это тема.
+- Адрес темы — секрет: он лежит в `push-endpoints.json` (режим `0600`). Относитесь к файлу и его резервным копиям как к учётным данным. Блокировка номера удаляет его регистрацию.
+- Сервер не пишет в журнал адреса, ключи и содержимое.
+
+## 6. APNs (необязательно)
+
+В этом репозитории нет iOS-клиента; серверная часть готова, если он появится. Задайте все четыре переменные: `APNS_KEY_FILE` (путь к ключу `.p8`, права `0600`, вне репозитория), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC` (идентификатор пакета приложения). Одна или две переменные — ошибка запуска с перечнем недостающих; нечитаемый или не P-256 ключ — тоже. После этого `registered.pushProviders` содержит `apns`, а клиент регистрирует `{ provider: "apns", token, environment? }` (`production` или `sandbox`).
+
+Сервер подписывает токен ES256 и обновляет его не реже раза в 50 минут, соединяется по HTTP/2 с `api.push.apple.com` (для `sandbox` — `api.sandbox.push.apple.com`). Сообщения и звонки уходят общим уведомлением («Новое сообщение», «Входящий звонок») с теми же `kind` и `id`; `call_ended` — тихим фоновым. `410` и `BadDeviceToken` удаляют регистрацию.
+
+## 7. Ограничения
+
+- Нужен дистрибьютор UnifiedPush (ntfy, Conversations и другие). Без него push не будет.
+- Принудительно остановленное приложение (**Настройки → Приложения → Остановить**) система не будит ничем, включая UnifiedPush; push заработает снова после ручного запуска Line.
+- Производители с агрессивной экономией заряда могут усыплять и приложение, и дистрибьютор. Отключите оптимизацию для обоих.
+- Push — доставка «по возможности». Если подсказка потеряна, сообщения всё равно ждут на сервере и придут при следующем подключении (до 7 суток); звонок без подсказки пропадёт через 45 секунд, но попадёт в пропущенные.
+- Сервер запоминает одну регистрацию на номер: вторая установка того же номера заменяет первую.
+
+## 8. Диагностика
+
+| Симптом | Что проверить |
+| --- | --- |
+| `registered.pushProviders` пуст или нет поля | сервер старше 0.8.0 или клиент зарегистрировался не с протоколом 8 |
+| `invalid_push_endpoint` | адрес не `https`, содержит логин, частный или без точки (для самопальной сети нужен `PUSH_ALLOW_PRIVATE_ENDPOINTS=true`), лишнее поле в сообщении, `pubKey` без `auth` |
+| `push_provider_unsupported` | неизвестный провайдер, либо `apns` без настроенного APNs |
+| `rate_limited` на `push_register` | больше 20 регистраций в минуту: клиент зациклился |
+| `pushEnabled: false` после регистрации | отправлялся старый вид `{ token }`; нужен `provider` |
+| Подсказки не приходят | `curl -I https://ntfy.<домен>/v1/health` с VPS; ntfy отвечает `429` (лимиты, пункт 5 раздела 2) или `401/403` (закрытый доступ, пункт 6); у телефона отключён фон для ntfy |
+| Регистрация исчезла | ntfy ответил `404/410` на адрес (тема удалена или дистрибьютор переустановлен): Line должен зарегистрироваться заново |
+| Старый телефон 0.7.1 не получает push | ожидаемо: Firebase удалён; сообщения придут при подключении |
+
+Сервер не логирует push-данные. Для проверки состояния смотрите `registered.pushEnabled`; файл `push-endpoints.json` содержит адреса тем и ключи, поэтому не копируйте его содержимое в обращения и чаты.

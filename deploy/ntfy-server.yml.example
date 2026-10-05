@@ -1,0 +1,21 @@
+# Example /etc/ntfy/server.yml for a self-hosted ntfy used as a UnifiedPush distributor server.
+# Copy, replace the host names and the IP address, then follow docs/PUSH-SETUP.md. Nothing here is a secret.
+
+# Public HTTPS address of ntfy (the Caddy block in deploy/Caddyfile terminates TLS for it).
+base-url: "https://ntfy.example.org"
+listen-http: "127.0.0.1:2586"
+behind-proxy: true
+
+# Keeps messages briefly so a phone that was offline for a moment still receives the wake-up.
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "12h"
+
+# The Line API server posts every wake-up from the same address, so exempt it from per-visitor rate limits.
+# Use the public IPv4 address of this VPS.
+visitor-request-limit-exempt-hosts: "203.0.113.10"
+
+# Option A (default): nothing more is needed. UnifiedPush topics are long random names created by the phone.
+# Option B: restrict the server to your own users, but keep push topics writable for the Line API server:
+#   auth-file: "/var/lib/ntfy/user.db"
+#   auth-default-access: "deny-all"
+# then run:  ntfy user add <name>   and   ntfy access '*' 'up*' write-only

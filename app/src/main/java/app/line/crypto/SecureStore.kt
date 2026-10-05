@@ -9,6 +9,16 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import app.line.ActivityEvent
+import app.line.R
+import app.line.core.AttachmentPayload
+import app.line.core.MediaIntake
+import app.line.core.MessageStatus
+import app.line.core.OutboxFull
+import app.line.core.Receipts
+import app.line.core.StoredAttachment
+import app.line.core.StoredStage
+import app.line.media.attachments.AttachmentRepository
+import app.line.ui.Locales
 import org.json.JSONArray
 import org.json.JSONObject
 import org.signal.libsignal.protocol.IdentityKey
@@ -54,14 +64,38 @@ data class ChatMessage(
     val status: String,
     val sequence: Long,
     val createdAt: Long,
+    /** `text` or, for attachments, `image` / `voice` / `file`; the sealed [text] then holds the attachment descriptor JSON. */
+    val kind: String = "text",
+) {
+    val state: MessageStatus get() = MessageStatus.parse(status)
+}
+
+/** The latest message of one dialog plus how many incoming messages have not been read yet. */
+data class Conversation(val last: ChatMessage, val unread: Int) {
+    val peer: String get() = last.peer
+}
+
+/** Transfer bookkeeping of one attachment message. Keys never live here: they stay inside the sealed descriptor. */
+data class AttachmentRow(
+    val messageId: String,
+    val blobId: String,
+    val outgoing: Boolean,
+    val stage: String,
+    val size: Long,
+    val played: Boolean,
 )
 
+/** What a message keeps on disk, so that the files can go when the message does. */
+data class AttachmentBlob(val messageId: String, val blobId: String, val outgoing: Boolean)
+
+/** [receipt] items carry no chat row: they are sent silently and dropped as soon as the server accepts them. */
 data class OutboxItem(
     val peer: String,
     val id: String,
     val cipherType: Int,
     val body: String,
     val createdAt: Long,
+    val receipt: Boolean = false,
 )
 
 private data class MessageActivityRecord(
@@ -75,7 +109,7 @@ class PeerIdentityChangedException(number: String) :
     SecurityException("The pinned Signal identity changed for $number")
 
 /** Synchronous encrypted storage. Call from an IO dispatcher; all operations serialize on this instance. */
-class SecureStore(context: Context) : AutoCloseable {
+class SecureStore(context: Context) : AutoCloseable, AttachmentRepository {
     private val appContext = context.applicationContext ?: context
     private val alias = "${appContext.packageName}.line.secure-store.v1"
     private val dbFile = appContext.getDatabasePath(DATABASE_NAME)
@@ -247,7 +281,7 @@ class SecureStore(context: Context) : AutoCloseable {
             }
             check(findMessage(id) == null) { "Message id is already assigned to another record" }
             val envelope = encryptInternal(peer, plaintext)
-            if (displayText != null) saveMessageInternal(peer, id, displayText, true, "queued")
+            if (displayText != null) saveMessageInternal(peer, id, displayText, true, MessageStatus.PENDING.wire)
             putOutboxInternal(peer, id, envelope)
             putSecret("outbox-request", id, sha256(plaintext))
             envelope
@@ -266,7 +300,7 @@ class SecureStore(context: Context) : AutoCloseable {
 
     /** Decrypts and stores chat text atomically with the ratchet step; returns null for an already-stored chat. */
     @Synchronized
-    fun decryptAndStore(number: String, cipherType: Int, body: String, id: String): JSONObject? {
+    fun decryptAndStore(number: String, cipherType: Int, body: String, id: String, sentAt: Long = 0): JSONObject? {
         ensureOpen()
         val peer = validNumber(number)
         validId(id)
@@ -278,6 +312,7 @@ class SecureStore(context: Context) : AutoCloseable {
                 check(previous.peer == peer && !previous.outgoing) { "Message id is already assigned to another record" }
                 return@transaction null
             }
+            if (envelopeSeen(id)) return@transaction null
             val plaintext = decryptInternal(peer, cipherType, body)
             require(plaintext.size <= MAX_ENVELOPE_BYTES) { "Decrypted message exceeds the size limit" }
             val payload = try {
@@ -292,13 +327,31 @@ class SecureStore(context: Context) : AutoCloseable {
                     require(text.toByteArray(StandardCharsets.UTF_8).size <= MAX_CHAT_TEXT_BYTES) {
                         "Chat text exceeds the size limit"
                     }
-                    saveMessageInternal(peer, id, text, false, "received")
-                    recordActivityEventInternal(ActivityEvent(
-                        id, ActivityEvent.MESSAGE, peer, true, "received", System.currentTimeMillis(),
-                    ))
+                    val now = System.currentTimeMillis()
+                    saveMessageInternal(peer, id, text, false, MessageStatus.RECEIVED.wire, if (sentAt in 1..now) sentAt else now)
+                    if (Receipts.supported(payload)) setPeerReceipts(peer, true)
                 }
-                "call-key" -> Unit
-                else -> throw SecurityException("Unsupported decrypted payload kind")
+                "receipt" -> {
+                    Receipts.parseRead(payload)?.let { applyReadReceiptInternal(peer, it) }
+                    markEnvelopeSeen(id)
+                }
+                AttachmentPayload.KIND -> {
+                    val now = System.currentTimeMillis()
+                    val createdAt = if (sentAt in 1..now) sentAt else now
+                    val intake = MediaIntake.classify(payload, id)
+                    if (intake is MediaIntake.Accepted && !blobKnown(intake.payload.blobId)) {
+                        val media = intake.payload
+                        saveMessageInternal(peer, id, intake.descriptor, false, MessageStatus.RECEIVED.wire, createdAt, media.displayKind())
+                        insertAttachmentInternal(id, media.blobId, false, StoredStage.initial(false), media.size)
+                    } else {
+                        // Never fail the ratchet over an attachment this version cannot use: keep a readable placeholder.
+                        val text = Locales.wrap(appContext).getString(R.string.md_unsupported_message)
+                        saveMessageInternal(peer, id, text, false, MessageStatus.RECEIVED.wire, createdAt)
+                    }
+                    if (Receipts.supported(payload)) setPeerReceipts(peer, true)
+                }
+                "call-key" -> markEnvelopeSeen(id)
+                else -> markEnvelopeSeen(id) // a newer client may send kinds this version does not know; consume, never loop
             }
             payload
         }
@@ -402,7 +455,7 @@ class SecureStore(context: Context) : AutoCloseable {
             if (checkedPeer != null) { clauses += "peer=?"; args += checkedPeer }
             var rowsRead = 0
             db.query(
-                "messages", arrayOf("id", "peer", "text", "outgoing", "status", "sequence", "created_at"),
+                "messages", MESSAGE_COLUMNS,
                 clauses.joinToString(" AND "), args.toTypedArray(), null, null, "sequence DESC", MAX_PAGE_SIZE.toString(),
             ).use { cursor ->
                 while (cursor.moveToNext() && matches.size < boundedLimit) {
@@ -412,7 +465,7 @@ class SecureStore(context: Context) : AutoCloseable {
                     val sequence = cursor.getLong(5)
                     val text = open("messages", scopedKey(messagePeer, id), cursor.getBlob(2)).toString(StandardCharsets.UTF_8)
                     cursorBefore = sequence
-                    if (text.lowercase(Locale.ROOT).contains(needle)) matches += ChatMessage(
+                    if (cursor.getString(7) == "text" && text.lowercase(Locale.ROOT).contains(needle)) matches += ChatMessage(
                         id, messagePeer, text, cursor.getInt(3) != 0, cursor.getString(4), sequence, cursor.getLong(6),
                     )
                 }
@@ -435,6 +488,7 @@ class SecureStore(context: Context) : AutoCloseable {
             } ?: return@transaction
 
             wipeMessageText(message.first, id)
+            db.delete("attachments", "message_id=?", arrayOf(id))
             db.delete("activity_events", "id=?", arrayOf(id))
             if (message.second) removeQueuedMessage(id)
         }
@@ -462,6 +516,7 @@ class SecureStore(context: Context) : AutoCloseable {
                 }
             }
 
+            db.delete("attachments", "message_id IN (SELECT id FROM messages WHERE peer=?)", arrayOf(checkedPeer))
             val queuedIds = ArrayList<String>()
             db.query("outbox", arrayOf("id"), "peer=?", arrayOf(checkedPeer), null, null, null).use { cursor ->
                 while (cursor.moveToNext()) queuedIds += cursor.getString(0)
@@ -483,7 +538,7 @@ class SecureStore(context: Context) : AutoCloseable {
         val descending = ArrayList<ChatMessage>(boundedLimit)
         db.query(
             "messages",
-            arrayOf("id", "peer", "text", "outgoing", "status", "sequence", "created_at"),
+            MESSAGE_COLUMNS,
             selection,
             args,
             null,
@@ -498,7 +553,7 @@ class SecureStore(context: Context) : AutoCloseable {
                     .toString(StandardCharsets.UTF_8)
                 descending += ChatMessage(
                     id, messagePeer, text, cursor.getInt(3) != 0, cursor.getString(4),
-                    cursor.getLong(5), cursor.getLong(6),
+                    cursor.getLong(5), cursor.getLong(6), cursor.getString(7),
                 )
             }
         }
@@ -506,20 +561,25 @@ class SecureStore(context: Context) : AutoCloseable {
     }
 
     @Synchronized
-    fun conversations(before: Long? = null, limit: Int = 40): List<ChatMessage> {
+    fun conversations(before: Long? = null, limit: Int = 40): List<Conversation> {
+        val unread = unreadCounts()
+        return latestMessages(before, limit).map { Conversation(it, unread[it.peer] ?: 0) }
+    }
+
+    private fun latestMessages(before: Long?, limit: Int): List<ChatMessage> {
         ensureOpen()
         val cursorClause = if (before == null) "WHERE m.deleted=0" else "WHERE m.deleted=0 AND m.sequence < ?"
         val args = if (before == null) arrayOf(limit.coerceIn(1, MAX_PAGE_SIZE).toString())
             else arrayOf(before.toString(), limit.coerceIn(1, MAX_PAGE_SIZE).toString())
         val result = ArrayList<ChatMessage>()
-        db.rawQuery("""SELECT m.id, m.peer, m.text, m.outgoing, m.status, m.sequence, m.created_at
+        db.rawQuery("""SELECT m.id, m.peer, m.text, m.outgoing, m.status, m.sequence, m.created_at, m.kind
             FROM messages m JOIN (SELECT peer, MAX(sequence) AS latest FROM messages WHERE deleted=0 GROUP BY peer) c
             ON m.sequence=c.latest $cursorClause ORDER BY m.sequence DESC LIMIT ?""", args).use { cursor ->
             while (cursor.moveToNext()) {
                 val id = cursor.getString(0)
                 val peer = cursor.getString(1)
                 result += ChatMessage(id, peer, open("messages", scopedKey(peer, id), cursor.getBlob(2)).toString(StandardCharsets.UTF_8),
-                    cursor.getInt(3) != 0, cursor.getString(4), cursor.getLong(5), cursor.getLong(6))
+                    cursor.getInt(3) != 0, cursor.getString(4), cursor.getLong(5), cursor.getLong(6), cursor.getString(7))
             }
         }
         return result
@@ -662,7 +722,7 @@ class SecureStore(context: Context) : AutoCloseable {
         return transaction {
             val queued = getOutbox(id) != null
             removeOutbox(id)
-            updateMessageStatus(id, "delivered")
+            advanceOutgoing(id, MessageStatus.DELIVERED)
             queued
         }
     }
@@ -674,8 +734,415 @@ class SecureStore(context: Context) : AutoCloseable {
         transaction {
             db.delete("outbox", "id=?", arrayOf(id))
             deleteSecret("outbox-request", id)
-            val values = ContentValues().apply { put("status", "sent") }
-            db.update("messages", values, "id=? AND deleted=0", arrayOf(id))
+            advanceOutgoing(id, MessageStatus.SENT)
+        }
+    }
+
+    /** Items that still have to reach the server: unacknowledged chat messages and receipts, oldest first. */
+    @Synchronized
+    fun pendingOutbox(): List<OutboxItem> {
+        ensureOpen()
+        val result = ArrayList<OutboxItem>()
+        db.rawQuery(
+            "SELECT o.peer, o.id, o.cipher_type, o.body, o.created_at, m.status, a.stage FROM outbox o " +
+                "LEFT JOIN messages m ON m.id = o.id LEFT JOIN attachments a ON a.message_id = o.id " +
+                "ORDER BY o.created_at ASC, o.id ASC", null,
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val status = if (cursor.isNull(5)) null else cursor.getString(5)
+                if (status != null && MessageStatus.parse(status) != MessageStatus.PENDING) continue
+                if (!cursor.isNull(6) && cursor.getString(6) != "uploaded") continue
+                val peer = cursor.getString(0)
+                val id = cursor.getString(1)
+                val body = open("outbox", scopedKey(peer, id), cursor.getBlob(3)).toString(StandardCharsets.UTF_8)
+                result += OutboxItem(peer, id, cursor.getInt(2), body, cursor.getLong(4), receipt = status == null)
+            }
+        }
+        return result
+    }
+
+    /** The server accepted the envelope: the message is no longer waiting locally. Idempotent and forward-only. */
+    @Synchronized
+    fun acknowledgeQueued(id: String): Boolean {
+        ensureOpen()
+        validId(id)
+        return transaction {
+            val inOutbox = getOutbox(id) != null
+            removeQueuedMessage(id)
+            advanceOutgoing(id, MessageStatus.SENT)
+            inOutbox
+        }
+    }
+
+    /** Applies a server or peer acknowledgement to an outgoing message without ever moving its status backwards. */
+    @Synchronized
+    fun advanceStatus(id: String, next: MessageStatus): Boolean {
+        ensureOpen()
+        validId(id)
+        return transaction { advanceOutgoing(id, next) }
+    }
+
+    /** Failed -> pending so that the outbox sends the same ciphertext again. */
+    @Synchronized
+    fun retryMessage(id: String): Boolean {
+        ensureOpen()
+        validId(id)
+        return transaction {
+            val values = ContentValues().apply { put("status", MessageStatus.PENDING.wire) }
+            db.update("messages", values, "id=? AND outgoing=1 AND deleted=0 AND status='failed'", arrayOf(id)) == 1
+        }
+    }
+
+    private fun advanceOutgoing(id: String, next: MessageStatus): Boolean {
+        val current = db.query("messages", arrayOf("status"), "id=? AND outgoing=1 AND deleted=0", arrayOf(id), null, null, null, "1")
+            .use { if (it.moveToFirst()) MessageStatus.parse(it.getString(0)) else return false }
+        val target = MessageStatus.advance(current, next)
+        if (target == current) return false
+        db.update("messages", ContentValues().apply { put("status", target.wire) }, "id=?", arrayOf(id))
+        return true
+    }
+
+    private fun applyReadReceiptInternal(peer: String, ids: List<String>) {
+        ids.forEach { id ->
+            db.query("messages", arrayOf("peer"), "id=? AND outgoing=1", arrayOf(id), null, null, null, "1").use { cursor ->
+                if (cursor.moveToFirst() && cursor.getString(0) == peer) advanceOutgoing(id, MessageStatus.READ)
+            }
+        }
+    }
+
+    /** Marks everything received from [peer] as read and returns the ids that were unread (oldest first). */
+    @Synchronized
+    fun markRead(peer: String): List<String> {
+        ensureOpen()
+        val checked = validNumber(peer)
+        return transaction {
+            val ids = ArrayList<String>()
+            db.query("messages", arrayOf("id"), "peer=? AND outgoing=0 AND deleted=0 AND status='received'", arrayOf(checked),
+                null, null, "sequence ASC").use { while (it.moveToNext()) ids += it.getString(0) }
+            if (ids.isNotEmpty()) {
+                db.update("messages", ContentValues().apply { put("status", MessageStatus.READ.wire) },
+                    "peer=? AND outgoing=0 AND deleted=0 AND status='received'", arrayOf(checked))
+            }
+            ids
+        }
+    }
+
+    @Synchronized
+    fun pendingMessageCount(): Int {
+        ensureOpen()
+        return db.rawQuery("SELECT COUNT(*) FROM messages WHERE outgoing=1 AND deleted=0 AND status IN ('pending','queued')", null)
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
+
+    @Synchronized
+    fun unreadCounts(): Map<String, Int> {
+        ensureOpen()
+        val counts = LinkedHashMap<String, Int>()
+        db.rawQuery("SELECT peer, COUNT(*) FROM messages WHERE outgoing=0 AND deleted=0 AND status='received' GROUP BY peer", null)
+            .use { while (it.moveToNext()) counts[it.getString(0)] = it.getInt(1) }
+        return counts
+    }
+
+    /** Numbers of every pinned contact; used to refresh their public display names. */
+    @Synchronized
+    fun knownPeers(): List<String> {
+        ensureOpen()
+        val result = ArrayList<String>()
+        db.query("peers", arrayOf("peer"), null, null, null, null, "peer ASC").use { while (it.moveToNext()) result += it.getString(0) }
+        return result
+    }
+
+    /** The newest unread incoming messages of one dialog, oldest first, for the notification of that dialog. */
+    @Synchronized
+    fun unreadMessages(peer: String, limit: Int = 6): List<ChatMessage> {
+        ensureOpen()
+        val checked = validNumber(peer)
+        val descending = ArrayList<ChatMessage>()
+        db.query("messages", MESSAGE_COLUMNS, "peer=? AND outgoing=0 AND deleted=0 AND status='received'", arrayOf(checked),
+            null, null, "sequence DESC", limit.coerceIn(1, MAX_PAGE_SIZE).toString()).use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val messagePeer = cursor.getString(1)
+                descending += ChatMessage(id, messagePeer, open("messages", scopedKey(messagePeer, id), cursor.getBlob(2))
+                    .toString(StandardCharsets.UTF_8), cursor.getInt(3) != 0, cursor.getString(4), cursor.getLong(5),
+                    cursor.getLong(6), cursor.getString(7))
+            }
+        }
+        return descending.asReversed()
+    }
+
+    /** Encrypts a read receipt for [ids] into the outbox; null if the peer is not known to understand receipts. */
+    @Synchronized
+    fun queueReadReceipt(peer: String, ids: List<String>): OutboxItem? {
+        ensureOpen()
+        val checked = validNumber(peer)
+        if (ids.isEmpty()) return null
+        return transaction {
+            ensureLocalIdentity()
+            if (!peerSupportsReceiptsInternal(checked) || !protocolStore.isVerified(checked) || rowCount("outbox") >= MAX_OUTBOX_ITEMS) return@transaction null
+            val id = java.util.UUID.randomUUID().toString()
+            val envelope = encryptInternal(checked, Receipts.read(ids.takeLast(Receipts.MAX_IDS)).toString().toByteArray(StandardCharsets.UTF_8))
+            putOutboxInternal(checked, id, envelope)
+            getOutbox(id)?.copy(receipt = true)
+        }
+    }
+
+    @Synchronized
+    fun peerSupportsReceipts(peer: String): Boolean {
+        ensureOpen()
+        return peerSupportsReceiptsInternal(validNumber(peer))
+    }
+
+    /** The server reported the highest protocol version a peer registered with; 8+ understands receipts and media. */
+    @Synchronized
+    fun setPeerProtocol(peer: String, protocol: Int) {
+        ensureOpen()
+        val checked = validNumber(peer)
+        transaction { if (protocol >= 8) setPeerReceipts(checked, true) }
+    }
+
+    private fun peerSupportsReceiptsInternal(peer: String): Boolean = getSecret("peer-receipts", peer) != null
+    private fun setPeerReceipts(peer: String, supported: Boolean) {
+        if (supported) putSecret("peer-receipts", peer, byteArrayOf(1)) else deleteSecret("peer-receipts", peer)
+    }
+
+    private fun envelopeSeen(id: String): Boolean =
+        db.query("seen_envelopes", arrayOf("id"), "id=?", arrayOf(id), null, null, null, "1").use { it.moveToFirst() }
+
+    private fun markEnvelopeSeen(id: String) {
+        val now = System.currentTimeMillis()
+        db.delete("seen_envelopes", "seen_at<?", arrayOf((now - SEEN_ENVELOPE_RETENTION_MILLIS).toString()))
+        db.insertWithOnConflict("seen_envelopes", null, ContentValues().apply { put("id", id); put("seen_at", now) },
+            SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    // ---- attachments ----------------------------------------------------------------------------------
+
+    /** False when the encrypted outbox cannot take another item. */
+    @Synchronized
+    fun outboxHasRoom(): Boolean {
+        ensureOpen()
+        return rowCount("outbox") < MAX_OUTBOX_ITEMS
+    }
+
+    /**
+     * Stores an outgoing attachment message atomically: the Signal envelope for [descriptor] (the payload with the blob
+     * id and key), the chat row (pending, [kind] image/voice/file, sealed descriptor as text), the outbox item and the
+     * attachment row (queued). The outbox releases the envelope only once the blob is uploaded.
+     */
+    @Synchronized
+    fun queueAttachment(
+        peer: String,
+        messageId: String,
+        descriptor: String,
+        kind: String,
+        blobId: String,
+        blobSize: Long,
+    ): EncryptedEnvelope {
+        ensureOpen()
+        val checkedPeer = validNumber(peer)
+        validId(messageId)
+        require(kind in MEDIA_KINDS) { "Not an attachment kind" }
+        val plaintext = descriptor.toByteArray(StandardCharsets.UTF_8)
+        require(plaintext.size <= MAX_ENVELOPE_BYTES) { "Encrypted payload exceeds the size limit" }
+        return transaction {
+            ensureLocalIdentity()
+            requireVerified(checkedPeer)
+            check(findMessage(messageId) == null && getOutbox(messageId) == null) { "Message id is already assigned to another record" }
+            check(!blobKnown(blobId)) { "Blob id is already assigned to another message" }
+            if (rowCount("outbox") >= MAX_OUTBOX_ITEMS) throw OutboxFull(MAX_OUTBOX_ITEMS)
+            val envelope = encryptInternal(checkedPeer, plaintext)
+            saveMessageInternal(checkedPeer, messageId, descriptor, true, MessageStatus.PENDING.wire, kind = kind)
+            putOutboxInternal(checkedPeer, messageId, envelope)
+            putSecret("outbox-request", messageId, sha256(plaintext))
+            insertAttachmentInternal(messageId, blobId, true, StoredStage.initial(true), blobSize)
+            envelope
+        }
+    }
+
+    @Synchronized
+    override fun attachment(messageId: String): StoredAttachment? {
+        ensureOpen()
+        validId(messageId)
+        return storedAttachments("a.message_id=?", arrayOf(messageId), "m.sequence ASC", 1).firstOrNull()
+    }
+
+    @Synchronized
+    override fun pendingUploads(limit: Int): List<StoredAttachment> {
+        ensureOpen()
+        return storedAttachments("a.outgoing=1 AND a.stage=?", arrayOf(StoredStage.QUEUED.wire), "m.sequence ASC", limit)
+    }
+
+    @Synchronized
+    override fun pendingDownloads(peer: String?, limit: Int): List<StoredAttachment> {
+        ensureOpen()
+        val checked = peer?.let(::validNumber)
+        return if (checked == null) {
+            storedAttachments("a.outgoing=0 AND a.stage=?", arrayOf(StoredStage.REMOTE.wire), "m.sequence DESC", limit)
+        } else {
+            storedAttachments("a.outgoing=0 AND a.stage=? AND m.peer=?", arrayOf(StoredStage.REMOTE.wire, checked), "m.sequence DESC", limit)
+        }
+    }
+
+    @Synchronized
+    override fun blobIds(): Set<String> {
+        ensureOpen()
+        val ids = HashSet<String>()
+        db.query("attachments", arrayOf("blob_id"), null, null, null, null, null).use { while (it.moveToNext()) ids += it.getString(0) }
+        return ids
+    }
+
+    @Synchronized
+    override fun moveStage(messageId: String, to: StoredStage): Boolean {
+        ensureOpen()
+        validId(messageId)
+        return transaction {
+            val row = attachmentRowInternal(messageId) ?: return@transaction false
+            val from = StoredStage.parse(row.stage) ?: return@transaction false
+            if (!StoredStage.allowed(row.outgoing, from, to)) return@transaction false
+            val values = ContentValues().apply { put("stage", to.wire); put("updated_at", System.currentTimeMillis()) }
+            val changed = db.update("attachments", values, "message_id=? AND stage=?", arrayOf(messageId, from.wire)) == 1
+            if (changed && row.outgoing) {
+                if (to == StoredStage.FAILED) {
+                    advanceOutgoing(messageId, MessageStatus.FAILED)
+                } else if (from == StoredStage.FAILED && to == StoredStage.QUEUED) {
+                    db.update("messages", ContentValues().apply { put("status", MessageStatus.PENDING.wire) },
+                        "id=? AND outgoing=1 AND deleted=0 AND status='failed'", arrayOf(messageId))
+                }
+            }
+            changed
+        }
+    }
+
+    /** Transfer rows of the given messages in one query; messages without a row are absent from the result. */
+    @Synchronized
+    fun attachmentRows(messageIds: Collection<String>): Map<String, AttachmentRow> {
+        ensureOpen()
+        val rows = LinkedHashMap<String, AttachmentRow>()
+        messageIds.distinct().chunked(MAX_PAGE_SIZE).forEach { chunk ->
+            val marks = chunk.joinToString(",") { "?" }
+            db.query("attachments", ATTACHMENT_COLUMNS, "message_id IN ($marks)", chunk.toTypedArray(), null, null, null).use { cursor ->
+                while (cursor.moveToNext()) readAttachmentRow(cursor).let { rows[it.messageId] = it }
+            }
+        }
+        return rows
+    }
+
+    /** Local-only: a voice message the user has listened to. False when nothing changed. */
+    @Synchronized
+    fun markPlayed(messageId: String): Boolean {
+        ensureOpen()
+        validId(messageId)
+        return transaction {
+            db.update("attachments", ContentValues().apply { put("played", 1) },
+                "message_id=? AND outgoing=0 AND played=0", arrayOf(messageId)) == 1
+        }
+    }
+
+    /** The files [messageId] owns; read it before deleting the message. */
+    @Synchronized
+    fun attachmentBlobs(messageId: String): List<AttachmentBlob> {
+        ensureOpen()
+        validId(messageId)
+        return readBlobs("SELECT message_id, blob_id, outgoing FROM attachments WHERE message_id=?", arrayOf(messageId))
+    }
+
+    @Synchronized
+    fun attachmentBlobsOfPeer(peer: String): List<AttachmentBlob> {
+        ensureOpen()
+        return readBlobs(
+            "SELECT a.message_id, a.blob_id, a.outgoing FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.peer=?",
+            arrayOf(validNumber(peer)),
+        )
+    }
+
+    private fun readBlobs(sql: String, args: Array<String>): List<AttachmentBlob> {
+        val blobs = ArrayList<AttachmentBlob>()
+        db.rawQuery(sql, args).use { while (it.moveToNext()) blobs += AttachmentBlob(it.getString(0), it.getString(1), it.getInt(2) != 0) }
+        return blobs
+    }
+
+    private fun storedAttachments(where: String, args: Array<String>, order: String, limit: Int): List<StoredAttachment> {
+        val result = ArrayList<StoredAttachment>()
+        db.rawQuery(
+            "SELECT m.id, m.peer, m.text, m.status, a.blob_id, a.outgoing, a.stage, a.size, a.played FROM attachments a " +
+                "JOIN messages m ON m.id = a.message_id WHERE m.deleted=0 AND $where ORDER BY $order LIMIT ${limit.coerceIn(1, 1000)}",
+            args,
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val peer = cursor.getString(1)
+                val text = open("messages", scopedKey(peer, id), cursor.getBlob(2)).toString(StandardCharsets.UTF_8)
+                val payload = MediaIntake.descriptor(text) ?: continue
+                val stage = StoredStage.parse(cursor.getString(6)) ?: continue
+                result += StoredAttachment(
+                    id, peer, cursor.getInt(5) != 0, stage, cursor.getString(4), cursor.getLong(7), cursor.getInt(8) != 0,
+                    MessageStatus.parse(cursor.getString(3)), payload,
+                )
+            }
+        }
+        return result
+    }
+
+    private fun attachmentRowInternal(messageId: String): AttachmentRow? =
+        db.query("attachments", ATTACHMENT_COLUMNS, "message_id=?", arrayOf(messageId), null, null, null, "1")
+            .use { if (it.moveToFirst()) readAttachmentRow(it) else null }
+
+    private fun readAttachmentRow(cursor: android.database.Cursor) = AttachmentRow(
+        cursor.getString(0), cursor.getString(1), cursor.getInt(2) != 0, cursor.getString(3), cursor.getLong(4), cursor.getInt(5) != 0,
+    )
+
+    private fun blobKnown(blobId: String): Boolean =
+        db.query("attachments", arrayOf("message_id"), "blob_id=?", arrayOf(blobId.lowercase(Locale.ROOT)), null, null, null, "1")
+            .use { it.moveToFirst() }
+
+    private fun insertAttachmentInternal(messageId: String, blobId: String, outgoing: Boolean, stage: StoredStage, size: Long) {
+        val values = ContentValues().apply {
+            put("message_id", messageId)
+            put("blob_id", blobId.lowercase(Locale.ROOT))
+            put("outgoing", if (outgoing) 1 else 0)
+            put("stage", stage.wire)
+            put("size", size)
+            put("played", 0)
+            put("updated_at", System.currentTimeMillis())
+        }
+        db.insertOrThrow("attachments", null, values)
+    }
+
+    /** Cached public display name of a peer (server profile). An empty name removes the entry. */
+    @Synchronized
+    fun saveProfile(number: String, name: String, updatedAt: Long) {
+        ensureOpen()
+        val checked = validNumber(number)
+        transaction {
+            if (name.isEmpty()) deleteSecret("profile", checked)
+            else putSecret("profile", checked, JSONObject().put("name", name).put("updatedAt", updatedAt).toString().toByteArray(StandardCharsets.UTF_8))
+        }
+    }
+
+    @Synchronized
+    fun profiles(): Map<String, String> {
+        ensureOpen()
+        val result = LinkedHashMap<String, String>()
+        secretEntries("profile").forEach { (number, bytes) ->
+            runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)).getString("name") }.getOrNull()
+                ?.takeIf(String::isNotEmpty)?.let { result[number] = it }
+        }
+        return result
+    }
+
+    @Synchronized
+    fun ownName(): String {
+        ensureOpen()
+        return getSecret("settings", "profile-name")?.toString(StandardCharsets.UTF_8).orEmpty()
+    }
+
+    @Synchronized
+    fun setOwnName(name: String) {
+        ensureOpen()
+        transaction {
+            if (name.isEmpty()) deleteSecret("settings", "profile-name")
+            else putSecret("settings", "profile-name", name.toByteArray(StandardCharsets.UTF_8))
         }
     }
 
@@ -795,14 +1262,18 @@ class SecureStore(context: Context) : AutoCloseable {
         }
     }
 
-    private fun saveMessageInternal(peer: String, id: String, text: String, outgoing: Boolean, status: String) {
+    private fun saveMessageInternal(
+        peer: String, id: String, text: String, outgoing: Boolean, status: String,
+        createdAt: Long = System.currentTimeMillis(), kind: String = "text",
+    ) {
         val values = ContentValues().apply {
             put("id", id)
             put("peer", peer)
             put("text", seal("messages", scopedKey(peer, id), text.toByteArray(StandardCharsets.UTF_8)))
             put("outgoing", if (outgoing) 1 else 0)
             put("status", status)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", createdAt)
+            put("kind", kind)
         }
         db.insertOrThrow("messages", null, values)
     }
@@ -823,7 +1294,7 @@ class SecureStore(context: Context) : AutoCloseable {
     private fun findMessage(id: String): ChatMessage? {
         db.query(
             "messages",
-            arrayOf("id", "peer", "text", "outgoing", "status", "sequence", "created_at"),
+            MESSAGE_COLUMNS,
             "id=?", arrayOf(id), null, null, null, "1",
         ).use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -831,7 +1302,7 @@ class SecureStore(context: Context) : AutoCloseable {
             return ChatMessage(
                 cursor.getString(0), peer,
                 open("messages", scopedKey(peer, id), cursor.getBlob(2)).toString(StandardCharsets.UTF_8),
-                cursor.getInt(3) != 0, cursor.getString(4), cursor.getLong(5), cursor.getLong(6),
+                cursor.getInt(3) != 0, cursor.getString(4), cursor.getLong(5), cursor.getLong(6), cursor.getString(7),
             )
         }
     }
@@ -1230,42 +1701,32 @@ class SecureStore(context: Context) : AutoCloseable {
                 id TEXT PRIMARY KEY, peer TEXT NOT NULL, cipher_type INTEGER NOT NULL,
                 body BLOB NOT NULL, created_at INTEGER NOT NULL)""")
             database.execSQL("CREATE INDEX outbox_created_at ON outbox(created_at, id)")
-            createActivityEventsTable(database)
+            SchemaMigrations.activityEvents().forEach(database::execSQL)
+            SchemaMigrations.toVersion4().forEach(database::execSQL)
         }
 
         override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            var version = oldVersion
-            if (version == 1) {
-                database.execSQL("ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
-                version = 2
+            val steps = try {
+                SchemaMigrations.upgrade(oldVersion, newVersion)
+            } catch (e: IllegalArgumentException) {
+                throw SQLiteException(e.message)
             }
-            if (version == 2) {
-                createActivityEventsTable(database)
-                version = 3
-            }
-            if (version != newVersion) {
-                throw SQLiteException("Unsupported secure-store schema upgrade $oldVersion -> $newVersion")
-            }
-        }
-
-        private fun createActivityEventsTable(database: SQLiteDatabase) {
-            database.execSQL("""CREATE TABLE activity_events (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-                timestamp INTEGER NOT NULL, payload BLOB NOT NULL)""")
-            database.execSQL("CREATE INDEX activity_events_timestamp ON activity_events(timestamp DESC)")
-            database.execSQL("CREATE TABLE activity_clock (id INTEGER PRIMARY KEY CHECK(id=1), timestamp INTEGER NOT NULL)")
-            database.execSQL("INSERT INTO activity_clock(id, timestamp) VALUES(1, 0)")
+            steps.forEach(database::execSQL)
         }
     }
 
     companion object {
         private const val DATABASE_NAME = "line-secure-store.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = SchemaMigrations.CURRENT
         private const val DEVICE_ID = 1
         private const val PREKEY_POOL_SIZE = 100
         private const val MAX_PAGE_SIZE = 100
         private const val MAX_ACTIVITY_EVENTS = 300
         private const val MAX_OUTBOX_ITEMS = 100
+        private const val SEEN_ENVELOPE_RETENTION_MILLIS = 8L * 24 * 60 * 60 * 1000
+        private val MESSAGE_COLUMNS = arrayOf("id", "peer", "text", "outgoing", "status", "sequence", "created_at", "kind")
+        private val ATTACHMENT_COLUMNS = arrayOf("message_id", "blob_id", "outgoing", "stage", "size", "played")
+        private val MEDIA_KINDS = setOf("image", "voice", "file")
         private const val MAX_ENVELOPE_BYTES = 16 * 1024
         private const val MAX_CHAT_TEXT_BYTES = 4 * 1024
         private const val MAX_SEARCH_QUERY_BYTES = 4 * 1024

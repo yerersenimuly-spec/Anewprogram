@@ -13,8 +13,44 @@ import app.line.crypto.ChatMessage
 import app.line.crypto.SecureStore
 import app.line.media.CallMediaEngine
 import app.line.media.LiveCallEngine
-import app.line.push.PushConfiguration
-import app.line.push.PushAlerts
+import app.line.core.AttachmentCrypto
+import app.line.core.AttachmentPayload
+import app.line.core.AttachmentTooLarge
+import app.line.core.AttachmentUnreadable
+import app.line.core.AttachmentView
+import app.line.core.AttachmentViews
+import app.line.core.AutoFetchPolicy
+import app.line.core.CallSummary
+import app.line.core.MediaDraft
+import app.line.core.MediaIntake
+import app.line.core.MediaLimits
+import app.line.core.MediaNotSupportedByPeer
+import app.line.core.MediaPreview
+import app.line.core.MediaUnavailable
+import app.line.core.OutboxFull
+import app.line.core.StoredStage
+import app.line.core.TransferStage
+import app.line.media.attachments.AttachmentEngine
+import app.line.media.attachments.AttachmentFiles
+import app.line.media.attachments.AttachmentGateway
+import app.line.media.attachments.AttachmentPrepareException
+import app.line.media.attachments.BlobException
+import app.line.media.attachments.BlobTransfer
+import app.line.media.attachments.ImageProcessor
+import app.line.media.attachments.Ticket
+import app.line.media.attachments.TicketRefused
+import app.line.media.attachments.TicketRequest
+import app.line.media.attachments.VoiceRecorder
+import app.line.media.attachments.toSendException
+import app.line.ui.Locales
+import app.line.core.DisplayName
+import app.line.core.MessageStatus
+import app.line.core.ReconnectPolicy
+import app.line.core.Receipts
+import app.line.core.SendFailure
+import app.line.core.ServerInfo
+import app.line.crypto.Conversation
+import app.line.push.PushRegistrar
 import app.line.media.MediaEvent
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -23,8 +59,15 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FileInputStream
+import java.io.FileNotFoundException
+import java.io.IOException
+import java.io.InputStream
 import java.security.SecureRandom
 import java.util.UUID
+
+/** Identity, number and trust are bound to one server; switching servers needs a fresh installation. */
+class DifferentServerException : IllegalStateException()
 
 class CallService : Service() {
     private data class CallAttempt(
@@ -51,6 +94,8 @@ class CallService : Service() {
     private var registrationHandshake: RegistrationHandshake? = null
     private var retryJob: Job? = null
     private val lookups = mutableMapOf<String, CompletableDeferred<JSONObject>>()
+    private val blobRequests = mutableMapOf<String, CompletableDeferred<JSONObject>>()
+    private val pendingBlobAcks = LinkedHashSet<String>()
     private val adminRequests = mutableMapOf<String, CompletableDeferred<JSONObject>>()
     private var adminExpiresAt = 0L
     private var adminEpoch = 0
@@ -70,17 +115,47 @@ class CallService : Service() {
     private var callOperation: Job? = null
     private var callOperationEpoch = 0
     private var foreground = false
+    private val reconnect = ReconnectPolicy()
+    private var httpConfig: EndpointConfig? = null
+    private var connectedNetwork: Network? = null
+    private var socketOpening = false
+    private val inFlight = mutableSetOf<String>()
+    private var ackWatchdog: Job? = null
+    private var flushRetry: Job? = null
+    private var networkGrace: Job? = null
+    private var resumeWatch: Job? = null
+    private var viewingPeer: String? = null
+    private var profiles: Map<String, String> = emptyMap()
+    private val profileRequests = mutableMapOf<String, List<String>>()
+    private val outboxFlush = Mutex()
     private var wakeLock: PowerManager.WakeLock? = null
     private var callTimeout: Job? = null
     private var registrationTimeout: Job? = null
     private val network by lazy { getSystemService(ConnectivityManager::class.java) }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(available: Network) {
+            scope.launch {
+                networkGrace?.cancel(); networkGrace = null
+                if (config() == null) return@launch
+                if (!state.online) {
+                    if (!socketOpening) { retryJob?.cancel(); reconnect.reset(); connect() }
+                } else if (connectedNetwork != null && connectedNetwork != available) {
+                    connect()
+                }
+            }
+        }
+
         override fun onLost(lost: Network) {
             scope.launch {
-                delay(500)
-                val active = network.activeNetwork
-                if (active == null || network.getNetworkCapabilities(active)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {
-                    if (state.phase != Phase.IDLE) finish("Интернет отключён. Звонок завершён", outcome = "failed")
+                delay(400)
+                if (hasInternet()) return@launch
+                if (config() != null) update(state.copy(link = Link.WAITING_NETWORK))
+                if (state.phase != Phase.IDLE && networkGrace == null) {
+                    networkGrace = launch {
+                        delay(CALL_NETWORK_GRACE_MS)
+                        networkGrace = null
+                        if (!hasInternet() && state.phase != Phase.IDLE) finish(Notice.CALL_NETWORK_LOST, outcome = "failed")
+                    }
                 }
             }
         }
@@ -102,33 +177,46 @@ class CallService : Service() {
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) {
                     if (message.optString("type") == "envelope") {
-                        update(state.copy(message = "Неверное или повторное зашифрованное сообщение отклонено"))
-                    } else if (state.phase != Phase.IDLE || foreground) finish("Ошибка протокола звонка")
-                    else update(state.copy(message = "Неверное сообщение сервера отклонено"))
+                        update(state.copy(notice = Notice.MESSAGE_REJECTED, noticeVersion = state.noticeVersion + 1))
+                    } else if (state.phase != Phase.IDLE || foreground) finish(Notice.CALL_PROTOCOL)
+                    else update(state.copy(notice = Notice.SERVER_MESSAGE_REJECTED, noticeVersion = state.noticeVersion + 1))
                 }
             }
         }
         val initialGeneration = generation
-        work { secure.await(); if (generation == initialGeneration) connect() }
+        work {
+            secure.await()
+            loadProfileCache()
+            refreshPending()
+            if (generation == initialGeneration) connect()
+            bestEffort { media().sweep() }
+        }
     }
 
     override fun onBind(intent: Intent): IBinder = binder
     fun observe(listener: (CallState) -> Unit) { listeners.add(listener); listener(state) }
     fun removeObserver(listener: (CallState) -> Unit) { listeners.remove(listener) }
 
+    private var lastNotificationKey = ""
+
     private fun update(value: CallState) {
         state = value
         listeners.toList().forEach { it(value) }
-        if (foreground) getSystemService(NotificationManager::class.java)
-            .notify(AppNotifications.ACTIVE_CALL_ID, notification())
+        if (foreground) {
+            val key = "${value.phase}|${value.muted}|${value.link}|${value.pending}|${value.members.size}|${value.connectedAt > 0}"
+            if (key != lastNotificationKey) {
+                lastNotificationKey = key
+                getSystemService(NotificationManager::class.java).notify(AppNotifications.ACTIVE_CALL_ID, notification())
+            }
+        }
     }
 
     private fun work(block: suspend () -> Unit): Job = scope.launch {
         try { block() } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
-            if (callAttempt != null) finish("Ошибка защищённого соединения. Проверьте SAS участников", outcome = "failed")
-            else if (state.phase != Phase.IDLE || foreground) finish("Ошибка защищённого соединения. Проверьте SAS участников")
-            else update(state.copy(message = "Операция не выполнена: проверьте сеть, ключи и SAS"))
+            if (callAttempt != null) finish(Notice.CALL_SECURE_FAILED, outcome = "failed")
+            else if (state.phase != Phase.IDLE || foreground) finish(Notice.CALL_SECURE_FAILED)
+            else update(state.copy(notice = Notice.OPERATION_FAILED, noticeVersion = state.noticeVersion + 1))
         }
     }
 
@@ -146,7 +234,7 @@ class CallService : Service() {
         if (state.phase != Phase.IDLE) return
         value.validate()
         val old = config()
-        require(old == null || old.apiUrl == value.apiUrl) { "Для другого сервера нужен отдельный профиль/очистка данных: номера и доверие не переносятся" }
+        if (old != null && old.apiUrl != value.apiUrl) throw DifferentServerException()
         generation++
         cancelLookups("Connection settings changed")
         prefs.edit().putString("endpoint", value.apiUrl).putString("api_pins", value.apiPins)
@@ -156,7 +244,7 @@ class CallService : Service() {
         work { connect() }
     }
 
-    fun reconnectNow() { if (state.phase == Phase.IDLE) work { connect() } }
+    fun reconnectNow() { if (state.phase == Phase.IDLE || !state.online) work { retryJob?.cancel(); reconnect.reset(); connect() } }
     fun inboxSynchronized(): Boolean = state.online && inboxReady
 
     fun setQuality(highQuality: Boolean) {
@@ -223,6 +311,22 @@ class CallService : Service() {
     private fun cancelLookups(reason: String) {
         lookups.values.forEach { it.completeExceptionally(IllegalStateException(reason)) }
         lookups.clear()
+        blobRequests.values.forEach { it.completeExceptionally(BlobException.Network(message = reason)) }
+        blobRequests.clear()
+    }
+
+    private suspend fun bestEffort(block: suspend () -> Unit) {
+        try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+    }
+
+    private suspend fun refreshChat() {
+        val pending = db { it.pendingMessageCount() }
+        update(state.copy(chatVersion = state.chatVersion + 1, pending = pending))
+    }
+
+    private suspend fun refreshPending() {
+        val pending = db { it.pendingMessageCount() }
+        update(state.copy(pending = pending))
     }
 
     private fun launchCallOperation(phase: Phase, expectedCallId: String, block: suspend (Int, String) -> Unit) {
@@ -235,13 +339,13 @@ class CallService : Service() {
                 block(epoch, expectedCallId)
             } catch (timeout: TimeoutCancellationException) {
                 if (isCallOperationCurrent(epoch, phase, expectedCallId)) {
-                    finish("Нет ответа или соединения. Звонок завершён")
+                    finish(Notice.CALL_NO_ANSWER)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 if (callOperationEpoch == epoch && callId == expectedCallId && state.phase != Phase.IDLE) {
-                    finish("Ошибка защищённого соединения. Проверьте SAS участников")
+                    finish(Notice.CALL_SECURE_FAILED)
                 }
             } finally {
                 if (callOperation === current) callOperation = null
@@ -265,6 +369,22 @@ class CallService : Service() {
             state.phase in setOf(Phase.CONNECTING, Phase.CONNECTED)) { "Call operation is no longer current" }
     }
 
+    private fun clientFor(endpoints: EndpointConfig): OkHttpClient {
+        val existing = http
+        if (existing != null && httpConfig == endpoints) {
+            existing.connectionPool.evictAll()
+            return existing
+        }
+        existing?.dispatcher?.executorService?.shutdown()
+        existing?.connectionPool?.evictAll()
+        return httpClientFactory(endpoints).also { http = it; httpConfig = endpoints }
+    }
+
+    private fun hasInternet(): Boolean {
+        val active = network.activeNetwork ?: return false
+        return network.getNetworkCapabilities(active)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }
+
     private suspend fun connect() {
         inboxReady = false
         retryJob?.cancel()
@@ -274,30 +394,27 @@ class CallService : Service() {
         cancelLookups("Connection changed")
         socket?.cancel()
         socket = null
-        http?.dispatcher?.executorService?.shutdown()
-        http?.connectionPool?.evictAll()
-        http = null
+        inFlight.clear()
+        ackWatchdog?.cancel()
         val endpoints = config() ?: run {
-            update(state.copy(online = false, mediaReady = false, configReady = false, message = "Подключите Line, чтобы получить номер"))
+            socketOpening = false
+            update(state.copy(online = false, mediaReady = false, configReady = false, link = Link.NONE))
             return
         }
         val bundle = publicBundleProvider()
         if (epoch != generation) return
         val handshake = RegistrationHandshake(token(), bundle)
         registrationHandshake = handshake
-        val client = httpClientFactory(endpoints)
-        if (epoch != generation) {
-            client.dispatcher.executorService.shutdown()
-            client.connectionPool.evictAll()
-            return
-        }
-        http = client
-        update(state.copy(online = false, mediaReady = false, serverProtocol = 0, message = "Подключение…"))
+        val client = clientFor(endpoints)
+        connectedNetwork = network.activeNetwork
+        socketOpening = true
+        update(state.copy(online = false, mediaReady = false, serverProtocol = 0,
+            link = if (hasInternet()) Link.CONNECTING else Link.WAITING_NETWORK))
         socket = client.newWebSocket(Request.Builder().url(endpoints.apiUrl).build(), object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
                 scope.launch { if (epoch == generation) {
                     ws.send(handshake.packet().toString())
-                    registrationTimeout = scope.launch { delay(15_000); if (!state.online) disconnected(epoch) }
+                    registrationTimeout = scope.launch { delay(REGISTRATION_TIMEOUT_MS); if (!state.online) disconnected(epoch) }
                 } }
             }
             override fun onMessage(ws: WebSocket, text: String) {
@@ -308,7 +425,7 @@ class CallService : Service() {
                     if (retry != null) {
                         registrationTimeout?.cancel()
                         if (!ws.send(retry.toString())) { disconnected(epoch); return@launch }
-                        registrationTimeout = scope.launch { delay(15_000); if (!state.online) disconnected(epoch) }
+                        registrationTimeout = scope.launch { delay(REGISTRATION_TIMEOUT_MS); if (!state.online) disconnected(epoch) }
                         return@launch
                     }
                     val requestId = message.optString("requestId")
@@ -317,9 +434,10 @@ class CallService : Service() {
                     } else if (requestId.isNotEmpty() && message.optString("type") == "bundle") {
                         val pending = lookups.remove(requestId)
                         val bundle = message.optJSONObject("bundle")
+                        message.optJSONObject("profile")?.let { rememberProfile(message.optString("peer"), it) }
                         if (bundle != null) pending?.complete(bundle)
                         else pending?.completeExceptionally(IllegalStateException("Invalid bundle"))
-                    } else if (requestId.isNotEmpty() && message.optString("type") == "error") {
+                    } else if (requestId.isNotEmpty() && message.optString("type") == "error" && lookups.containsKey(requestId)) {
                         lookups.remove(requestId)?.completeExceptionally(IllegalStateException(message.optString("code")))
                     } else if (!incoming.trySend(epoch to message).isSuccess) disconnected(epoch)
                 }
@@ -328,20 +446,24 @@ class CallService : Service() {
             override fun onClosed(ws: WebSocket, code: Int, reason: String) { scope.launch { disconnected(epoch) } }
         })
     }
-
     private suspend fun disconnected(epoch: Int) {
         if (epoch != generation) return
         generation++
         lockAdmin()
         registrationTimeout?.cancel()
         socket?.cancel(); socket = null
+        socketOpening = false
         cancelLookups("Offline")
-        if (state.phase != Phase.IDLE) finish("Соединение потеряно. Звонок завершён", notifyServer = false, outcome = "failed")
-        update(state.copy(online = false, mediaReady = false, message = "Не удалось подключиться. Проверьте настройки сервиса"))
+        inFlight.clear(); ackWatchdog?.cancel()
+        // A connected call keeps its media session; the server holds the seat for a short grace period (protocol 8).
+        val keepCall = state.phase == Phase.CONNECTED && state.server.protocol >= 8
+        if (state.phase != Phase.IDLE && !keepCall) finish(Notice.CALL_NETWORK_LOST, notifyServer = false, outcome = "failed")
+        val internet = hasInternet()
+        update(state.copy(online = false, mediaReady = false, signalingLost = keepCall,
+            link = if (internet) Link.CONNECTING else Link.WAITING_NETWORK))
         retryJob?.cancel()
-        retryJob = scope.launch { delay(5_000); connect() }
+        if (internet) retryJob = scope.launch { delay(reconnect.nextDelayMs()); connect() }
     }
-
     private fun send(type: String, extra: JSONObject = JSONObject()): Boolean =
         socket?.send(extra.put("type", type).toString()) == true
 
@@ -364,40 +486,41 @@ class CallService : Service() {
     suspend fun verified(number: String): Boolean = db { it.isVerified(number) }
     suspend fun verifyPeer(number: String) {
         db { it.verifyPeer(number) }
+        releaseHeldSender(number)
         if (state.serverProtocol >= 7) { inboxReady = false; send("inbox_sync") }
     }
     suspend fun messages(number: String, before: Long? = null): List<ChatMessage> = db { it.messages(number, before, 40) }
     suspend fun searchMessages(query: String, peer: String? = null, before: Long? = null): List<ChatMessage> =
         db { it.searchMessages(query, peer, before, 40) }
-    suspend fun conversations(before: Long? = null): List<ChatMessage> = db { it.conversations(before, 40) }
+    suspend fun conversations(before: Long? = null): List<Conversation> = db { it.conversations(before, 40) }
     suspend fun activityEvents(callsOnly: Boolean = false, before: Long? = null): List<ActivityEvent> =
         db { it.activityEvents(callsOnly, before, 40, incomingOnly = !callsOnly) }
 
-    suspend fun clearMessageNotifications(peer: String) {
-        var cursor: Long? = null
-        do {
-            val page = db { it.activityEvents(before = cursor, limit = 100) }
-            page.filter { it.kind == ActivityEvent.MESSAGE && it.peer == peer && it.incoming }
-                .forEach { AppNotifications.cancelMessage(this, it.id) }
-            cursor = page.lastOrNull()?.timestamp
-        } while (page.size == 100)
-    }
+    fun clearMessageNotifications(peer: String) = AppNotifications.cancelConversation(this, peer)
     suspend fun deleteMessage(id: String) {
+        val blobs = db { it.attachmentBlobs(id) }
+        blobs.forEach { media().cancel(it.messageId) }
         db { it.deleteMessage(id) }
-        chatEnvelopeIds.remove(id)
-        AppNotifications.cancelMessage(this, id)
-        update(state.copy(chatVersion = state.chatVersion + 1, eventVersion = state.eventVersion + 1))
+        inFlight.remove(id)
+        blobs.forEach { media().discard(it.messageId, it.blobId, acknowledge = !it.outgoing) }
+        refreshChat()
     }
     suspend fun clearConversation(peer: String) {
-        val removedEvents = db { it.clearConversation(peer) }
-        removedEvents.forEach { AppNotifications.cancelMessage(this, it) }
-        update(state.copy(chatVersion = state.chatVersion + 1, eventVersion = state.eventVersion + 1))
+        val blobs = db { it.attachmentBlobsOfPeer(peer) }
+        blobs.forEach { media().cancel(it.messageId) }
+        db { it.clearConversation(peer) }
+        blobs.forEach { media().discard(it.messageId, it.blobId, acknowledge = !it.outgoing) }
+        AppNotifications.cancelConversation(this, peer)
+        refreshChat()
     }
 
+    /** A lookup is only needed to create the first session; later messages are encrypted offline. */
     private suspend fun preparePeer(number: String) = sessionPreparation.withLock {
-        val exists = db { it.hasSession(number) }
-        if (exists && !state.online) { check(db { it.isVerified(number) }) { "SAS must be verified" }; return@withLock }
-        val bundle = lookup(number, consumePreKey = !exists)
+        if (db { it.hasSession(number) }) {
+            check(db { it.isVerified(number) }) { "SAS must be verified" }
+            return@withLock
+        }
+        val bundle = lookup(number, consumePreKey = true)
         db {
             it.rememberPeer(number, bundle)
             check(it.isVerified(number)) { "SAS must be verified" }
@@ -405,65 +528,215 @@ class CallService : Service() {
         }
     }
 
+    /** Offline-first: the message is encrypted and stored first; delivery to the server happens when a connection exists. */
     suspend fun sendChat(number: String, text: String) = chatSending.withLock {
-        check(state.chatEnabled) { "Администратор отключил сообщения" }
+        check(state.chatEnabled) { "chat disabled" }
         require(text.isNotBlank() && text.toByteArray().size <= 4_096)
         preparePeer(number)
         val id = UUID.randomUUID().toString()
-        val payload = JSONObject().put("kind", "chat").put("id", id).put("text", text).toString().toByteArray()
-        val envelope = db { it.encryptAndQueue(number, id, payload, text) }
-        chatEnvelopeIds.add(id)
-        if (state.online) send("envelope", JSONObject().put("to", number).put("id", id).put("cipherType", envelope.cipherType).put("body", envelope.body))
-        Feedback.messageSent(this)
+        val payload = Receipts.chat(id, text).toString().toByteArray()
+        db { it.encryptAndQueue(number, id, payload, text) }
+        refreshChat()
+        flushOutbox()
+    }
+
+    fun displayName(peer: String): String =
+        getSharedPreferences("line-ui", MODE_PRIVATE).getString("contact-$peer", null)?.takeIf { it.isNotBlank() }
+            ?: profiles[peer] ?: peer.chunked(4).joinToString(" ")
+
+    fun profileName(peer: String): String? = profiles[peer]
+
+    /** The conversation the user is looking at: incoming messages there are read immediately and not notified. */
+    fun setViewing(peer: String?) {
+        viewingPeer = peer
+        if (peer != null) work {
+            markRead(peer)
+            bestEffort { media().autoFetchConversation(peer, AutoFetchPolicy.Context(chatOpen = true, metered = isMetered())) }
+        }
+    }
+
+    suspend fun markRead(peer: String) {
+        val ids = db { it.markRead(peer) }
+        AppNotifications.cancelConversation(this, peer)
+        if (ids.isEmpty()) return
+        if (Settings.readReceipts(this) && db { it.queueReadReceipt(peer, ids) } != null) flushOutbox()
         update(state.copy(chatVersion = state.chatVersion + 1))
     }
 
+    suspend fun retryMessage(id: String) {
+        if (db { it.attachment(id) } != null) retryAttachment(id) else retryEnvelope(id)
+    }
+
+    private suspend fun retryEnvelope(id: String) {
+        if (db { it.retryMessage(id) }) {
+            refreshChat()
+            flushOutbox()
+        }
+    }
+
+    suspend fun unreadCounts(): Map<String, Int> = db { it.unreadCounts() }
+    fun heldSenders(): Set<String> = prefs.getStringSet("held_senders", emptySet()).orEmpty()
+
+    private fun holdSender(peer: String) {
+        if (peer in heldSenders()) return
+        prefs.edit().putStringSet("held_senders", heldSenders() + peer).apply()
+        update(state.copy(heldSenders = heldSenders().size, chatVersion = state.chatVersion + 1))
+        AppNotifications.showHeldSender(this, peer, displayName(peer))
+    }
+
+    private fun releaseHeldSender(peer: String) {
+        if (peer !in heldSenders()) return
+        prefs.edit().putStringSet("held_senders", heldSenders() - peer).apply()
+        update(state.copy(heldSenders = heldSenders().size, chatVersion = state.chatVersion + 1))
+    }
+
+    /** Sends every message and receipt that the server has not yet accepted, oldest first, once per connection. */
+    private suspend fun flushOutbox() = outboxFlush.withLock {
+        flushRetry?.cancel()
+        if (!state.online || !state.chatEnabled) return@withLock
+        val items = db { it.pendingOutbox() }
+        for (item in items) {
+            if (item.id in inFlight) continue
+            val packet = JSONObject().put("to", item.peer).put("id", item.id).put("cipherType", item.cipherType).put("body", item.body)
+            if (item.receipt && state.server.supportsSilentReceipts) packet.put("silent", true)
+            if (!send("envelope", packet)) break
+            inFlight.add(item.id)
+        }
+        if (inFlight.isNotEmpty()) watchAcknowledgements()
+    }
+
+    private fun watchAcknowledgements() {
+        ackWatchdog?.cancel()
+        val epoch = generation
+        ackWatchdog = scope.launch {
+            delay(ACK_TIMEOUT_MS)
+            if (epoch == generation && inFlight.isNotEmpty() && state.online) disconnected(epoch)
+        }
+    }
+
+    private fun scheduleFlush(delayMs: Long) {
+        flushRetry?.cancel()
+        flushRetry = scope.launch { delay(delayMs); flushOutbox() }
+    }
+
+    private suspend fun acknowledgeQueued(id: String) {
+        inFlight.remove(id)
+        if (inFlight.isEmpty()) ackWatchdog?.cancel()
+        db { it.acknowledgeQueued(id) }
+        refreshChat()
+    }
+
+    private suspend fun rejectEnvelope(id: String, code: String) {
+        inFlight.remove(id)
+        if (inFlight.isEmpty()) ackWatchdog?.cancel()
+        when (SendFailure.classify(code)) {
+            SendFailure.RETRY -> scheduleFlush(if (code == "chat_disabled") 60_000 else 15_000)
+            SendFailure.PERMANENT -> {
+                val failed = db {
+                    val changed = it.advanceStatus(id, MessageStatus.FAILED)
+                    if (!changed) it.removeOutbox(id)
+                    changed
+                }
+                if (failed) refreshChat()
+            }
+        }
+    }
+
+    private fun acknowledge(id: String) {
+        if (state.serverProtocol >= 7) send("delivery_ack", JSONObject().put("id", id))
+    }
     private suspend fun receive(message: JSONObject) {
         when (message.getString("type")) {
             "inbox_complete" -> inboxReady = true
             "registered" -> {
                 registrationTimeout?.cancel()
-                val protocol = registrationHandshake?.protocolVersion ?: 7
+                socketOpening = false
+                val sent = registrationHandshake?.protocolVersion ?: RegistrationHandshake.CURRENT
                 registrationHandshake?.accept()
-                inboxReady = protocol < 7
+                val info = ServerInfo.fromRegistered(message, sent, System.currentTimeMillis())
+                inboxReady = info.protocol < 7
                 val number = message.getString("number")
                 require(number.matches(Regex("[0-9]{8}")))
                 db { it.setLocalNumber(number) }
                 prefs.edit().putString("number", number).apply()
-                update(state.copy(number = number, online = true, mediaReady = message.optBoolean("mediaReady"),
+                reconnect.reset()
+                update(state.copy(number = number, online = true, link = Link.ONLINE, mediaReady = message.optBoolean("mediaReady"),
                     callsEnabled = message.optBoolean("callsEnabled", true), chatEnabled = message.optBoolean("chatEnabled", true),
-                    maxParticipants = message.optInt("maxParticipants", 8).coerceIn(2, 8), serverProtocol = protocol, message = "В сети"))
-                val outbox = db { it.outbox() }
-                chatEnvelopeIds.addAll(outbox.map { it.id })
-                if (state.chatEnabled) outbox.forEach { send("envelope", JSONObject().put("to", it.peer).put("id", it.id).put("cipherType", it.cipherType).put("body", it.body)) }
-                if (protocol >= 7) work {
-                    val pushToken = PushConfiguration.token(this@CallService)
-                    if (!pushToken.isNullOrBlank() && state.online && state.serverProtocol >= 7) send("push_register", JSONObject().put("token", pushToken))
+                    maxParticipants = message.optInt("maxParticipants", 8).coerceIn(2, 8), serverProtocol = info.protocol,
+                    server = info, pushActive = message.optBoolean("pushEnabled")))
+                flushOutbox()
+                registerPush()
+                work { syncOwnProfile(info); refreshPeerProfiles() }
+                if (info.supportsAttachments) {
+                    pendingBlobAcks.toList().forEach { acknowledgeBlob(it) }
+                    work { bestEffort { media().onOnline { peer -> AutoFetchPolicy.Context(viewingPeer == peer, isMetered()) } } }
+                }
+                watchCallResume()
+            }
+            "push_registered" -> {
+                PushRegistrar.acknowledged(this, message.optBoolean("pushEnabled"))
+                update(state.copy(pushActive = message.optBoolean("pushEnabled")))
+            }
+            "profile_updated" -> prefs.edit().putBoolean("name_dirty", false).apply()
+            "profiles" -> {
+                val requested = profileRequests.remove(message.optString("requestId")).orEmpty()
+                val listed = message.optJSONArray("profiles") ?: JSONArray()
+                val seen = mutableSetOf<String>()
+                for (i in 0 until listed.length()) {
+                    val item = listed.getJSONObject(i)
+                    seen += item.getString("number")
+                    rememberProfile(item.getString("number"), item, notify = false)
+                }
+                requested.filter { it !in seen && it in profiles }.forEach { gone -> removeName(gone) }
+                update(state.copy(profileVersion = state.profileVersion + 1))
+            }
+            "missed_call" -> {
+                val id = message.getString("callId")
+                val from = message.getString("from")
+                message.optString("fromName").takeIf { it.isNotEmpty() }?.let { rememberName(from, it) }
+                val at = message.optLong("at").takeIf { it > 0 } ?: System.currentTimeMillis()
+                db { it.recordActivityEvent(ActivityEvent(id, ActivityEvent.CALL, from, true, "missed", at)) }
+                send("missed_ack", JSONObject().put("callId", id))
+                AppNotifications.showMissedCall(this, displayName(from))
+                update(state.copy(eventVersion = state.eventVersion + 1))
+            }
+            "call_resume" -> {
+                if (callId.isNotEmpty() && message.optString("callId") == callId) {
+                    resumeWatch?.cancel()
+                    update(state.copy(signalingLost = false))
+                    send("join_call", JSONObject().put("callId", callId))
                 }
             }
             "capabilities" -> {
                 update(state.copy(callsEnabled = message.optBoolean("callsEnabled", true), chatEnabled = message.optBoolean("chatEnabled", true),
                     mediaReady = message.optBoolean("mediaReady"), maxParticipants = message.optInt("maxParticipants", 8).coerceIn(2, 8)))
-                if (!state.callsEnabled && state.phase != Phase.IDLE) finish("Администратор отключил звонки", false, "failed")
+                if (!state.callsEnabled && state.phase != Phase.IDLE) finish(Notice.CALLS_DISABLED, false, "failed")
             }
             "bundle" -> lookups.remove(message.getString("requestId"))?.complete(message.getJSONObject("bundle"))
+            "blob_ticket" -> blobRequests.remove(message.optString("requestId"))?.complete(message)
             "envelope" -> {
                 val from = message.getString("from")
                 val id = message.getString("id")
+                message.optString("fromName").takeIf { it.isNotEmpty() }?.let { rememberName(from, it) }
                 if (!db { it.isVerified(from) }) {
-                    AppNotifications.showIncomingMessage(this, from, id)
-                    update(state.copy(message = "Сообщение от $from отклонено: сначала сверьте SAS")); return
+                    holdSender(from)
+                    return
                 }
-                val payload = db { it.decryptAndStore(from, message.getInt("cipherType"), message.getString("body"), id) }
-                if (payload == null) { if (state.serverProtocol >= 7) send("delivery_ack", JSONObject().put("id", id)); return }
+                val cipherType = message.getInt("cipherType")
+                val payload = db { it.decryptAndStore(from, cipherType, message.getString("body"), id, message.optLong("sentAt", 0)) }
+                if (payload == null) { acknowledge(id); return }
                 when (payload.getString("kind")) {
                     "chat" -> {
                         require(payload.getString("id") == id)
-                        val text = payload.getString("text")
-                        require(text.toByteArray().size <= 4_096)
-                        update(state.copy(chatVersion = state.chatVersion + 1, eventVersion = state.eventVersion + 1,
-                            message = "Новое зашифрованное сообщение от $from"))
-                        AppNotifications.showIncomingMessage(this, from, id)
+                        require(payload.getString("text").toByteArray().size <= 4_096)
+                        update(state.copy(chatVersion = state.chatVersion + 1))
+                        if (viewingPeer == from) markRead(from) else notifyConversation(from)
+                    }
+                    "receipt" -> update(state.copy(chatVersion = state.chatVersion + 1))
+                    AttachmentPayload.KIND -> {
+                        update(state.copy(chatVersion = state.chatVersion + 1))
+                        bestEffort { media().autoFetch(id, AutoFetchPolicy.Context(chatOpen = viewingPeer == from, metered = isMetered())) }
+                        if (viewingPeer == from) markRead(from) else notifyConversation(from)
                     }
                     "call-key" -> {
                         require(payload.getString("owner") == from)
@@ -477,33 +750,16 @@ class CallService : Service() {
                         if (callId == idCall) adoptKey()
                     }
                 }
-                send("keys", JSONObject().put("bundle", db { it.publicBundle() }))
-                if (state.serverProtocol >= 7) send("delivery_ack", JSONObject().put("id", id))
-                PushAlerts.dismissMessage(this, id)
+                // Only a pre-key message consumes a one-time pre-key; replenishing after every message costs the server a disk write.
+                if (cipherType == 3) send("keys", JSONObject().put("bundle", db { it.publicBundle() }))
+                acknowledge(id)
             }
-            "queued" -> {
-                val id = message.getString("id")
-                if (id in chatEnvelopeIds) {
-                    db { it.updateMessageStatus(id, "queued") }
-                    update(state.copy(chatVersion = state.chatVersion + 1))
-                }
-            }
+            "queued", "sent" -> acknowledgeQueued(message.getString("id"))
             "delivered" -> {
                 val id = message.getString("id")
-                val removed = db { it.markDelivered(id) }
-                chatEnvelopeIds.remove(id)
-                if (removed) Feedback.messageSent(this)
-                update(state.copy(chatVersion = state.chatVersion + 1))
-            }
-            "sent" -> {
-                val id = message.getString("id")
-                if (!chatEnvelopeIds.remove(id)) return
-                val evicted = db {
-                    it.acknowledgeSent(id)
-                    it.recordMessageActivity(id, outgoing = true, outcome = "sent")
-                }
-                evicted.forEach { AppNotifications.cancelMessage(this, it) }
-                update(state.copy(chatVersion = state.chatVersion + 1, eventVersion = state.eventVersion + 1))
+                inFlight.remove(id)
+                db { it.markDelivered(id) }
+                refreshChat()
             }
             "call_created" -> {
                 if (state.phase != Phase.OUTGOING) return
@@ -530,21 +786,22 @@ class CallService : Service() {
                     }
                     checkCallOperation(epoch, Phase.OUTGOING, call)
                     check(send("join_call", JSONObject().put("callId", call)))
-                    update(state.copy(phase = Phase.CONNECTING, message = "Соединяем зашифрованную группу…"))
+                    update(state.copy(phase = Phase.CONNECTING))
                 }
             }
             "incoming" -> {
                 if (state.phase != Phase.IDLE) return
+                message.optString("ownerName").takeIf { it.isNotEmpty() }?.let { rememberName(message.getString("owner"), it) }
                 setupCall(message, incoming = true)
-                PushAlerts.dismissCall(this, callId)
                 prefs.edit().putString("notification_call_id", callId).apply()
-                update(state.copy(phase = Phase.INCOMING, peer = owner, message = "Входящий групповой звонок"))
+                update(state.copy(phase = Phase.INCOMING, peer = owner))
                 adoptKey()
-                if (consumePendingCallDismissal(callId)) finish("Звонок отклонён", outcome = "declined")
-                else AppNotifications.showIncomingCall(this, callId)
+                if (consumePendingCallDismissal(callId)) finish(Notice.CALL_DECLINED, outcome = "declined")
+                else if (Settings.notifyCalls(this)) AppNotifications.showIncomingCall(this, callId, displayName(owner), state.members.size)
             }
             "room_grant" -> {
                 require(message.getString("callId") == callId && message.getString("room") == callRoom)
+                if (engine != null && state.phase == Phase.CONNECTED) return
                 require(strings(message.getJSONArray("members")).toSet() == state.members.toSet())
                 require(message.getString("owner") == owner)
                 val endpoints = config() ?: error("No endpoints")
@@ -554,7 +811,7 @@ class CallService : Service() {
                 engine = mediaEngineFactory(this, scope) { event ->
                     work { if (callId == epochCall && epochCall.isNotEmpty()) mediaEvent(event) }
                 }
-                update(state.copy(phase = Phase.CONNECTING, message = "LiveKit · устанавливаем E2EE…"))
+                update(state.copy(phase = Phase.CONNECTING))
                 val media = engine!!
                 val token = message.getString("token")
                 val client = http ?: error("No signaling client")
@@ -565,27 +822,28 @@ class CallService : Service() {
                     checkMediaCallOperation(epoch, call)
                 }
             }
-            "ended" -> if (message.optString("callId") == callId) finish("Групповой звонок завершён", false)
+            "ended" -> if (message.optString("callId") == callId) finish(Notice.CALL_ENDED, false, endedOutcome(message.optString("reason")))
             "error" -> {
                 val request = message.optString("requestId")
                 lookups.remove(request)?.completeExceptionally(IllegalStateException(message.optString("code")))
+                blobRequests.remove(request)?.completeExceptionally(TicketRefused(message.optString("code")))
                 val id = message.optString("id")
-                if (id in chatEnvelopeIds) {
-                    val evicted = db {
-                        it.updateMessageStatus(id, "failed")
-                        it.recordMessageActivity(id, outgoing = true, outcome = "failed")
-                    }
-                    evicted.forEach { AppNotifications.cancelMessage(this, it) }
-                    update(state.copy(chatVersion = state.chatVersion + 1, eventVersion = state.eventVersion + 1,
-                        message = "Сообщение не отправлено: адресат недоступен"))
-                }
-                if (message.optString("code") == "replaced") {
+                val code = message.optString("code")
+                if (id.isNotEmpty() && id in inFlight) rejectEnvelope(id, code)
+                if (code == "replaced") {
                     generation++; socket?.cancel(); socket = null
-                    finish("Учётная запись открыта на другом устройстве", false, "failed")
-                    update(state.copy(online = false))
-                } else if (request.isEmpty() && id.isEmpty() && state.phase != Phase.IDLE) finish("Звонок невозможен: участник недоступен или LiveKit не настроен")
+                    finish(Notice.REPLACED, false, "failed")
+                    update(state.copy(online = false, link = Link.NONE))
+                } else if (request.isEmpty() && id.isEmpty() && state.phase != Phase.IDLE && code !in QUIET_ERRORS) {
+                    finish(Notice.CALL_UNAVAILABLE)
+                }
             }
         }
+    }
+    /** Outcome of a call that the server ended: reaching a peer who declined differs from a plain hang-up. */
+    private fun endedOutcome(reason: String): String? = when (reason) {
+        "declined" -> if (callAttempt?.connectedAt == 0L) "declined" else null
+        else -> null
     }
 
     private fun strings(array: JSONArray): List<String> = (0 until array.length()).map { array.getString(it) }
@@ -601,7 +859,7 @@ class CallService : Service() {
         else callAttempt = callAttempt?.copy(peer = peers)
         update(state.copy(members = members))
         callTimeout?.cancel()
-        callTimeout = scope.launch { delay(45_000); if (state.phase != Phase.CONNECTED) finish("Нет ответа или соединения. Звонок завершён") }
+        callTimeout = scope.launch { delay(45_000); if (state.phase != Phase.CONNECTED) finish(Notice.CALL_NO_ANSWER) }
     }
 
     private fun adoptKey() {
@@ -617,23 +875,32 @@ class CallService : Service() {
             is MediaEvent.Connected -> {
                 callTimeout?.cancel()
                 callAttempt = callAttempt?.copy(connectedAt = SystemClock.elapsedRealtime())
-                update(state.copy(phase = Phase.CONNECTED, connectedAt = SystemClock.elapsedRealtime(), message = "Голос E2EE · ${if (state.highQuality) "Opus HQ" else "Opus речь"}"))
+                update(state.copy(phase = Phase.CONNECTED, connectedAt = SystemClock.elapsedRealtime()))
             }
             is MediaEvent.Participants -> {
                 require(event.numbers.all { it in state.members }) { "Unexpected room participant" }
                 update(state.copy(participants = event.numbers))
             }
-            is MediaEvent.Disconnected -> if (state.phase != Phase.IDLE) finish("Медиасоединение потеряно. Звонок завершён", outcome = "failed")
-            is MediaEvent.Failed -> finish("Ошибка E2EE или медиасервера. Звонок завершён", outcome = "failed")
+            is MediaEvent.Disconnected -> if (state.phase != Phase.IDLE) finish(Notice.CALL_MEDIA_LOST, outcome = "failed")
+            is MediaEvent.Failed -> finish(Notice.CALL_MEDIA_FAILED, outcome = "failed")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            null -> if (Settings.persistent(this) && config() != null) enterPersistentForeground() else stopSelf()
+            ACTION_CONNECT -> enterPersistentForeground()
+            ACTION_REPLY -> {
+                val peer = intent.getStringExtra(AppNotifications.EXTRA_PEER).orEmpty()
+                val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString().orEmpty()
+                if (peer.matches(Regex("[0-9]{8}")) && text.isNotBlank()) work { sendChat(peer, text.trim()); markRead(peer) }
+            }
+            ACTION_MARK_READ -> intent.getStringExtra(AppNotifications.EXTRA_PEER)?.takeIf { it.matches(Regex("[0-9]{8}")) }
+                ?.let { peer -> work { markRead(peer) } }
             AppNotifications.ACTION_DISMISS_INCOMING -> {
                 val dismissed = intent.getStringExtra(AppNotifications.EXTRA_CALL_ID).orEmpty()
                 if (state.phase == Phase.INCOMING && dismissed == callId) {
-                    work { finish("Звонок отклонён", outcome = "declined") }
+                    work { finish(Notice.CALL_DECLINED, outcome = "declined") }
                 } else if (dismissed.isNotEmpty()) {
                     prefs.edit().putString("pending_call_dismissal", dismissed)
                         .putLong("pending_call_dismissal_at", System.currentTimeMillis()).apply()
@@ -645,23 +912,23 @@ class CallService : Service() {
                         val peers = intent.getStringArrayListExtra("members")?.distinct().orEmpty()
                         if (peers.isNotEmpty()) beginCallAttempt(peers.joinToString(","), incoming = false)
                     }
-                    scope.launch { finish("Нужен доступ к микрофону", outcome = if (intent.action == "accept") "missed" else "failed") }
+                    scope.launch { finish(Notice.MIC_REQUIRED, outcome = if (intent.action == "accept") "missed" else "failed") }
                     return START_NOT_STICKY
                 }
                 if (intent.action == "accept") AppNotifications.cancelIncomingCall(this)
-                if (!foreground) {
-                    if (Build.VERSION.SDK_INT >= 30) startForeground(AppNotifications.ACTIVE_CALL_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-                    else startForeground(AppNotifications.ACTIVE_CALL_ID, notification())
-                    foreground = true
-                }
+                startForegroundCompat(call = true)
                 work {
                     if (intent.action == "dial" && state.phase == Phase.IDLE) {
                         val members = intent.getStringArrayListExtra("members")?.distinct() ?: emptyList()
                         require(members.size in 1 until state.maxParticipants && state.number !in members)
                         beginCallAttempt(members.joinToString(","), incoming = false)
-                        require(state.online && state.mediaReady && state.callsEnabled)
-                        update(state.copy(phase = Phase.OUTGOING, peer = members.joinToString(", "), members = listOf(state.number) + members, message = "Создаём группу…"))
+                        require(state.callsEnabled && state.number.isNotEmpty())
+                        update(state.copy(phase = Phase.OUTGOING, peer = members.joinToString(", "), members = listOf(state.number) + members))
                         launchCallOperation(Phase.OUTGOING, "") { epoch, call ->
+                            if (!state.online) withTimeout(CALL_CONNECT_WAIT_MS) {
+                                while (!state.online) { checkCallOperation(epoch, Phase.OUTGOING, call); delay(100) }
+                            }
+                            check(state.mediaReady) { "Media service is not configured" }
                             withTimeout(20_000) {
                                 for (number in members) {
                                     checkCallOperation(epoch, Phase.OUTGOING, call)
@@ -674,7 +941,7 @@ class CallService : Service() {
                             check(send("create_call", JSONObject().put("members", JSONArray(members))))
                             callTimeout = scope.launch {
                                 delay(45_000)
-                                if (state.phase != Phase.CONNECTED) finish("Не удалось установить звонок")
+                                if (state.phase != Phase.CONNECTED) finish(Notice.CALL_NO_ANSWER)
                             }
                         }
                     } else if (intent.action == "accept" && state.phase == Phase.INCOMING) {
@@ -695,19 +962,19 @@ class CallService : Service() {
                             }
                             checkCallOperation(epoch, Phase.INCOMING, call)
                             acquireWakeLock()
-                            update(state.copy(phase = Phase.CONNECTING, message = "Соединяем…"))
+                            update(state.copy(phase = Phase.CONNECTING))
                             checkCallOperation(epoch, Phase.CONNECTING, call)
                             check(send("join_call", JSONObject().put("callId", call)))
                         }
                     } else if (state.phase == Phase.IDLE) {
-                        finish("Готов к звонку")
+                        finish(Notice.NONE)
                     }
                 }
             }
             "mute" -> toggleMute()
             "hangup" -> hangup()
         }
-        return START_NOT_STICKY
+        return if (Settings.persistent(this) && config() != null) START_STICKY else START_NOT_STICKY
     }
 
     @SuppressLint("WakelockTimeout")
@@ -739,7 +1006,7 @@ class CallService : Service() {
             state.phase == Phase.OUTGOING || state.phase == Phase.CONNECTING -> "cancelled"
             else -> "failed"
         }
-        finish("Звонок завершён", outcome = outcome)
+        finish(Notice.CALL_ENDED, outcome = outcome)
         if (pending) connect()
     } }
 
@@ -755,7 +1022,7 @@ class CallService : Service() {
         return id == serverCallId && System.currentTimeMillis() - savedAt <= 60_000
     }
 
-    private suspend fun finish(message: String, notifyServer: Boolean = true, outcome: String? = null) {
+    private suspend fun finish(notice: Notice, notifyServer: Boolean = true, outcome: String? = null) {
         callTimeout?.cancel(); callTimeout = null
         val operation = callOperation
         callOperation = null
@@ -764,6 +1031,7 @@ class CallService : Service() {
         val attempt = callAttempt
         var saved = false
         var result: String? = null
+        var summary: CallSummary? = null
         if (attempt != null && !attempt.eventRecorded) {
             callAttempt = attempt.copy(eventRecorded = true)
             val callOutcome = outcome ?: when {
@@ -775,15 +1043,18 @@ class CallService : Service() {
             val duration = if (attempt.connectedAt > 0)
                 (SystemClock.elapsedRealtime() - attempt.connectedAt).coerceAtLeast(0) / 1_000 else 0
             try {
-                val evicted = db { it.recordActivityEvent(ActivityEvent(
+                db { it.recordActivityEvent(ActivityEvent(
                     attempt.id, ActivityEvent.CALL, attempt.peer, attempt.incoming, callOutcome,
                     attempt.startedAt.coerceAtLeast(1), duration,
                 )) }
-                evicted.forEach { AppNotifications.cancelMessage(this, it) }
                 saved = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+            }
+            if (CallSummary.worthShowing(callOutcome, duration, attempt.incoming)) {
+                summary = CallSummary(attempt.id, attempt.peer.split(',').filter { it.isNotEmpty() }, attempt.incoming,
+                    callOutcome, duration, attempt.startedAt, System.currentTimeMillis())
             }
         }
         if (notifyServer && callId.isNotEmpty()) send(if (state.phase == Phase.INCOMING) "decline_call" else "leave_call", JSONObject().put("callId", callId))
@@ -792,20 +1063,401 @@ class CallService : Service() {
         roomKey?.fill(0); roomKey = null; pendingKeys.clear()
         val oldEngine = engine; engine = null
         update(state.copy(phase = Phase.IDLE, peer = "", members = emptyList(), participants = emptyList(),
-            muted = false, speaker = false, connectedAt = 0, safetyCode = "", message = message,
+            muted = false, speaker = false, connectedAt = 0, safetyCode = "", signalingLost = false,
+            notice = notice, noticeVersion = state.noticeVersion + 1, lastCall = summary ?: state.lastCall,
             eventVersion = state.eventVersion + if (saved) 1 else 0))
         oldEngine?.disconnect()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         wakeLock = null
-        foreground = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        resumeWatch?.cancel()
+        val persistent = Settings.persistent(this) && config() != null
+        if (persistent) runCatching { startForegroundCompat(call = false) }
+        else { foreground = false; stopForeground(STOP_FOREGROUND_REMOVE) }
         if (state.phase != Phase.INCOMING) AppNotifications.cancelIncomingCall(this)
-        if (saved && result == "missed" && attempt?.incoming == true) AppNotifications.showMissedCall(this)
+        if (saved && result == "missed" && attempt?.incoming == true) {
+            AppNotifications.showMissedCall(this, displayName(attempt.peer.substringBefore(',')))
+        }
         callAttempt = null
-        stopSelf()
+        if (!persistent) stopSelf()
+    }
+    private fun notification(): Notification =
+        if (state.phase == Phase.IDLE) AppNotifications.connection(this, state)
+        else AppNotifications.ongoingCall(this, displayName(state.members.firstOrNull { it != state.number } ?: ""),
+            state.members.size, state.muted, state.phase == Phase.CONNECTED)
+
+    // ---- profiles ---------------------------------------------------------------------------------
+
+    private suspend fun loadProfileCache() {
+        profiles = db { it.profiles() }
+        val own = db { it.ownName() }
+        update(state.copy(ownName = own, profileVersion = state.profileVersion + 1))
     }
 
-    private fun notification(): Notification = AppNotifications.ongoingCall(this, state.muted, state.phase == Phase.CONNECTED)
+    private suspend fun rememberProfile(number: String, json: JSONObject, notify: Boolean = true) {
+        if (!number.matches(Regex("[0-9]{8}"))) return
+        val proto = json.optInt("proto", 0)
+        if (proto > 0) db { it.setPeerProtocol(number, proto) }
+        val name = json.optString("name")
+        if (name.isEmpty()) { if (number in profiles) removeName(number) } else rememberName(number, name, json.optLong("updatedAt"), notify)
+    }
+
+    private suspend fun rememberName(number: String, raw: String, updatedAt: Long = 0, notify: Boolean = true) {
+        val name = DisplayName.normalize(raw)?.takeIf { it.isNotEmpty() } ?: return
+        if (profiles[number] == name) return
+        db { it.saveProfile(number, name, updatedAt) }
+        profiles = profiles + (number to name)
+        if (notify) update(state.copy(profileVersion = state.profileVersion + 1))
+    }
+
+    private suspend fun removeName(number: String) {
+        db { it.saveProfile(number, "", 0) }
+        profiles = profiles - number
+    }
+
+    /** Saves the display name locally first; it reaches the server now or at the next connection. */
+    suspend fun setOwnName(raw: String): Boolean {
+        val name = DisplayName.normalize(raw) ?: return false
+        db { it.setOwnName(name) }
+        prefs.edit().putBoolean("name_dirty", true).apply()
+        update(state.copy(ownName = name))
+        if (state.online && state.server.supportsProfiles) send("profile_set", JSONObject().put("name", name))
+        return true
+    }
+
+    private suspend fun syncOwnProfile(info: ServerInfo) {
+        if (!info.supportsProfiles) return
+        val own = db { it.ownName() }
+        if (prefs.getBoolean("name_dirty", false)) {
+            send("profile_set", JSONObject().put("name", own))
+        } else if (info.name != own) {
+            val adopted = DisplayName.normalize(info.name).orEmpty()
+            db { it.setOwnName(adopted) }
+            update(state.copy(ownName = adopted))
+        }
+    }
+
+    private suspend fun refreshPeerProfiles() {
+        if (!state.server.supportsProfiles) return
+        db { it.knownPeers() }.chunked(32).forEach { batch ->
+            val id = UUID.randomUUID().toString()
+            profileRequests[id] = batch
+            if (!send("profile_get", JSONObject().put("requestId", id).put("numbers", JSONArray(batch)))) return
+        }
+    }
+
+    /** Whether this peer is known to run a client that understands receipts and attachments. */
+    suspend fun peerSupportsMedia(peer: String): Boolean = db { it.peerSupportsReceipts(peer) }
+
+    // ---- push (UnifiedPush) --------------------------------------------------------------------------
+
+    private fun registerPush() {
+        val info = state.server
+        if (info.protocol < 8 || !info.supportsUnifiedPush) return
+        val endpoint = PushRegistrar.endpoint(this) ?: return
+        if (state.pushActive && PushRegistrar.isRegistered(this, endpoint)) return
+        PushRegistrar.markSent(this, endpoint)
+        send("push_register", JSONObject().put("provider", "unifiedpush").put("endpoint", endpoint.url).apply {
+            endpoint.pubKey?.let { put("pubKey", it) }
+            endpoint.auth?.let { put("auth", it) }
+        })
+    }
+
+    fun pushEndpointChanged() { if (state.online) registerPush() }
+    fun unregisterPush() { if (state.online && state.server.protocol >= 8) send("push_unregister") }
+
+    // ---- calls that survive a signaling reconnect ---------------------------------------------------
+
+    private fun watchCallResume() {
+        if (callId.isEmpty() || !state.signalingLost) return
+        resumeWatch?.cancel()
+        resumeWatch = scope.launch {
+            delay(RESUME_WAIT_MS)
+            if (state.signalingLost && callId.isNotEmpty()) finish(Notice.CALL_ENDED, notifyServer = false)
+        }
+    }
+
+    fun dismissLastCall() { if (state.lastCall != null) update(state.copy(lastCall = null)) }
+
+    // ---- notifications and foreground state ----------------------------------------------------------
+
+    private suspend fun notifyConversation(peer: String) {
+        if (!Settings.notifyMessages(this)) return
+        val unread = db { it.unreadMessages(peer, 6) }
+        if (unread.isEmpty()) return
+        AppNotifications.showConversation(this, peer, displayName(peer), unread.map { previewText(it) to it.createdAt },
+            hideContent = !Settings.notifyPreview(this))
+    }
+
+    private fun previewText(message: ChatMessage): String {
+        if (message.kind == "text") return message.text
+        val labels = Locales.wrap(this)
+        return when (MediaPreview.key(message.kind, message.text)) {
+            "media:image" -> MediaPreview.caption(message.text)?.let { labels.getString(R.string.md_preview_photo_caption, it) }
+                ?: labels.getString(R.string.notif_photo)
+            "media:voice" -> labels.getString(R.string.notif_voice)
+            "media:file" -> labels.getString(R.string.notif_file)
+            else -> labels.getString(R.string.notif_new_message)
+        }
+    }
+
+    private fun enterPersistentForeground() {
+        if (foreground) return
+        runCatching { startForegroundCompat(call = false) }.onFailure { if (state.phase == Phase.IDLE) stopSelf() }
+    }
+
+    private fun startForegroundCompat(call: Boolean) {
+        val note = notification()
+        when {
+            Build.VERSION.SDK_INT >= 34 -> startForeground(AppNotifications.ACTIVE_CALL_ID, note,
+                if (call) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            Build.VERSION.SDK_INT >= 29 -> startForeground(AppNotifications.ACTIVE_CALL_ID, note,
+                if (call) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+            else -> startForeground(AppNotifications.ACTIVE_CALL_ID, note)
+        }
+        foreground = true
+    }
+
+    /** Called after the user toggles the persistent connection. */
+    fun applyPersistentSetting() {
+        if (Settings.persistent(this) && config() != null) ensureRunning(this)
+        else if (state.phase == Phase.IDLE && foreground) { foreground = false; stopForeground(STOP_FOREGROUND_REMOVE) }
+    }
+
+    // ---- attachments: voice messages, photos, files ---------------------------------------------------
+    // Contract used by the screens. Sending encrypts a blob first, stores message + envelope + row in one transaction
+    // and uploads; the envelope leaves the outbox only after the upload (see SecureStore.pendingOutbox).
+
+    private val attachmentViews = AttachmentViews()
+    private val attachmentFiles by lazy { AttachmentFiles(filesDir, cacheDir) }
+
+    private val attachmentGateway = object : AttachmentGateway {
+        override val online: Boolean get() = state.online && state.server.supportsAttachments
+        override suspend fun ticket(request: TicketRequest): Ticket = blobTicket(request)
+        override fun transfer(): BlobTransfer? {
+            val client = http ?: return null
+            val endpoints = httpConfig ?: return null
+            return runCatching { BlobTransfer(client, BlobTransfer.originOf(endpoints.apiUrl)) }.getOrNull()
+        }
+        override fun acknowledgeBlob(blobId: String): Boolean = this@CallService.acknowledgeBlob(blobId)
+    }
+
+    private val attachmentListener = object : AttachmentEngine.Listener {
+        override fun attachmentChanged() { scope.launch { bumpAttachments() } }
+        override fun messageChanged() { work { refreshChat() } }
+        override fun uploaded(messageId: String) { work { flushOutbox() } }
+    }
+
+    private val attachmentEngine = scope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
+        AttachmentEngine(scope, secure.await(), attachmentFiles, attachmentGateway, attachmentViews, attachmentListener)
+    }
+
+    private suspend fun media(): AttachmentEngine = attachmentEngine.await()
+
+    private fun bumpAttachments() = update(state.copy(attachmentVersion = state.attachmentVersion + 1))
+
+    private fun isMetered(): Boolean = runCatching { network.isActiveNetworkMetered }.getOrDefault(true)
+
+    /** Asks the API server for a one-request grant to PUT or GET a blob. */
+    private suspend fun blobTicket(request: TicketRequest): Ticket {
+        if (!attachmentGateway.online) throw BlobException.Network(message = "Not connected")
+        val requestId = UUID.randomUUID().toString()
+        val pending = CompletableDeferred<JSONObject>()
+        blobRequests[requestId] = pending
+        try {
+            val (type, packet, blobId) = when (request) {
+                is TicketRequest.Upload -> Triple("blob_create",
+                    JSONObject().put("id", request.blobId).put("to", request.to).put("size", request.size), request.blobId)
+                is TicketRequest.Download -> Triple("blob_get", JSONObject().put("id", request.blobId), request.blobId)
+            }
+            if (!send(type, packet.put("requestId", requestId))) throw BlobException.Network(message = "Not connected")
+            val reply = withTimeoutOrNull(TICKET_TIMEOUT_MS) { pending.await() }
+                ?: throw BlobException.Network(message = "The server did not answer")
+            return try {
+                require(reply.getString("id").equals(blobId, ignoreCase = true))
+                Ticket(blobId.lowercase(), reply.getString("method"), reply.getString("path"), reply.getString("token"),
+                    reply.optLong("offset", 0), reply.optLong("size", 0))
+            } catch (e: Exception) {
+                throw BlobException.Server(502, "Invalid blob ticket")
+            }
+        } finally {
+            blobRequests.remove(requestId)
+        }
+    }
+
+    /** `blob_ack`: the blob is stored here, the server may drop it. Retried after a reconnect when the socket is down. */
+    private fun acknowledgeBlob(blobId: String): Boolean {
+        val sent = state.online && state.server.supportsAttachments && send("blob_ack", JSONObject().put("id", blobId))
+        if (sent) pendingBlobAcks.remove(blobId) else if (pendingBlobAcks.size < MAX_PENDING_BLOB_ACKS) pendingBlobAcks.add(blobId)
+        return sent
+    }
+
+    /** Null for plain text. Cheap and synchronous: served from memory, filled by [attachments]. */
+    fun attachment(message: ChatMessage): AttachmentView? {
+        if (message.kind == "text") return null
+        attachmentViews.get(message.id)?.let { return it }
+        val payload = MediaIntake.descriptor(message.text) ?: return null
+        return AttachmentViews.build(message.id, payload, message.outgoing, null, false, message.state)
+    }
+
+    /** Loads descriptors for the attachment messages in [messages] so that [attachment] can answer immediately. */
+    suspend fun attachments(messages: List<ChatMessage>) {
+        val missing = messages.filter { it.kind != "text" && attachmentViews.get(it.id) == null }
+        if (missing.isEmpty()) return
+        val engine = media()
+        repeat(3) { attempt ->
+            val generation = attachmentViews.generation()
+            val rows = db { it.attachmentRows(missing.map(ChatMessage::id)) }
+            val built = missing.mapNotNull { message ->
+                val payload = MediaIntake.descriptor(message.text) ?: return@mapNotNull null
+                val row = rows[message.id]
+                val progress = engine.progressOf(message.id)
+                AttachmentViews.build(message.id, payload, message.outgoing, StoredStage.parse(row?.stage), row?.played ?: false,
+                    message.state, transferring = progress != null, progress = progress ?: 0f)
+            }
+            // A transfer that changed a stage while the rows were being read would be overwritten by older data.
+            if (attachmentViews.putAllIfUnchanged(built, generation) || attempt == 2) {
+                if (attempt == 2) built.forEach { attachmentViews.putIfAbsent(it) }
+                return
+            }
+        }
+    }
+
+    /** Prepares (downscales, strips metadata), encrypts, queues and uploads. Works offline: the upload resumes later. */
+    suspend fun sendImage(peer: String, uri: android.net.Uri, caption: String? = null) {
+        requireMediaSend(peer)
+        val prepared = try {
+            ImageProcessor.prepare(this, uri)
+        } catch (e: AttachmentPrepareException) {
+            throw e.toSendException()
+        } catch (e: IOException) {
+            throw MediaUnavailable(e)
+        }
+        try {
+            val draft = MediaDraft.image(prepared.width, prepared.height, prepared.thumb, caption, prepared.mime)
+            queueMedia(peer, draft) { FileInputStream(prepared.file) }
+        } finally {
+            prepared.file.delete()
+        }
+    }
+
+    suspend fun sendFile(peer: String, uri: android.net.Uri) {
+        requireMediaSend(peer)
+        val info = try {
+            withContext(Dispatchers.IO) { ImageProcessor.fileInfo(this@CallService, uri) }
+        } catch (e: AttachmentPrepareException) {
+            throw e.toSendException()
+        }
+        if (info.size > MediaLimits.MAX_FILE_BYTES) throw AttachmentTooLarge(info.size, MediaLimits.MAX_FILE_BYTES)
+        queueMedia(peer, MediaDraft.file(info.name, info.mime)) {
+            try {
+                contentResolver.openInputStream(uri) ?: throw FileNotFoundException()
+            } catch (e: SecurityException) {
+                throw FileNotFoundException()
+            }
+        }
+    }
+
+    /** Deletes the recording's file once the message is queued; on an error the caller still owns it. */
+    suspend fun sendVoice(peer: String, recording: VoiceRecorder.Result) {
+        requireMediaSend(peer)
+        queueMedia(peer, MediaDraft.voice(recording.durationMs, recording.amplitudes, VoiceRecorder.MIME)) { FileInputStream(recording.file) }
+        recording.file.delete()
+    }
+
+    private suspend fun requireMediaSend(peer: String) {
+        if (!state.chatEnabled) throw MediaUnavailable()
+        chatSending.withLock { preparePeer(peer) }
+        if (!peerSupportsMedia(peer)) throw MediaNotSupportedByPeer(peer)
+        if (state.online && state.serverProtocol > 0 && !state.server.supportsAttachments) throw MediaUnavailable()
+        if (!db { it.outboxHasRoom() }) throw OutboxFull(OUTBOX_LIMIT)
+    }
+
+    private suspend fun queueMedia(peer: String, draft: MediaDraft, open: () -> InputStream) {
+        val messageId = UUID.randomUUID().toString()
+        val blobId = UUID.randomUUID().toString()
+        val key = AttachmentCrypto.newKey()
+        val plainSize = withContext(Dispatchers.IO) {
+            try {
+                open().use { attachmentFiles.seal(blobId, key, it) }
+            } catch (e: IOException) {
+                throw AttachmentUnreadable(e)
+            }
+        }
+        val payload = draft.toPayload(blobId, key, plainSize)
+        val descriptor = payload.toJson(messageId).toString()
+        try {
+            chatSending.withLock { db { it.queueAttachment(peer, messageId, descriptor, payload.displayKind(), blobId, payload.size) } }
+        } catch (e: Throwable) {
+            withContext(NonCancellable + Dispatchers.IO) { attachmentFiles.deleteBlob(blobId) }
+            throw e
+        }
+        attachmentViews.put(AttachmentViews.build(messageId, payload, true, StoredStage.QUEUED, false, MessageStatus.PENDING))
+        refreshChat()
+        media().upload(messageId)
+    }
+
+    /** Downloads an incoming attachment if it has not been fetched yet. Idempotent; progress shows through [attachment]. */
+    suspend fun fetchAttachment(messageId: String) { media().fetch(messageId) }
+
+    /** Decrypted copy in the cache for playing, viewing, saving or sharing. Fetches first when needed. */
+    suspend fun plainFile(messageId: String): java.io.File = media().plainFile(messageId)
+
+    suspend fun markPlayed(messageId: String) {
+        if (!db { it.markPlayed(messageId) }) return
+        attachmentViews.update(messageId) { it.copy(played = true) }
+        bumpAttachments()
+    }
+
+    /** Failed or expired upload/download: tries again. */
+    suspend fun retryAttachment(messageId: String) {
+        val stored = db { it.attachment(messageId) } ?: return
+        val engine = media()
+        if (stored.outgoing) {
+            when (stored.stage) {
+                StoredStage.FAILED -> if (db { it.moveStage(messageId, StoredStage.QUEUED) }) {
+                    attachmentViews.update(messageId) { it.copy(stage = TransferStage.QUEUED, progress = 0f) }
+                    refreshChat()
+                    engine.upload(messageId)
+                }
+                StoredStage.QUEUED -> engine.upload(messageId)
+                StoredStage.UPLOADED -> retryEnvelope(messageId)
+                else -> Unit
+            }
+        } else {
+            when (stored.stage) {
+                StoredStage.FAILED, StoredStage.EXPIRED -> if (db { it.moveStage(messageId, StoredStage.REMOTE) }) {
+                    attachmentViews.update(messageId) { it.copy(stage = TransferStage.QUEUED, progress = 0f) }
+                    bumpAttachments()
+                    engine.fetch(messageId)
+                }
+                StoredStage.REMOTE -> engine.fetch(messageId)
+                else -> Unit
+            }
+        }
+    }
+
+    companion object {
+        const val ACTION_CONNECT = "app.line.action.CONNECT"
+        const val ACTION_REPLY = "app.line.action.REPLY"
+        const val ACTION_MARK_READ = "app.line.action.MARK_READ"
+        const val KEY_REPLY = "line.reply"
+        private const val REGISTRATION_TIMEOUT_MS = 10_000L
+        private const val ACK_TIMEOUT_MS = 20_000L
+        private const val CALL_NETWORK_GRACE_MS = 20_000L
+        private const val CALL_CONNECT_WAIT_MS = 10_000L
+        private const val RESUME_WAIT_MS = 8_000L
+        private const val TICKET_TIMEOUT_MS = 15_000L
+        private const val MAX_PENDING_BLOB_ACKS = 200
+        private const val OUTBOX_LIMIT = 100
+        private val QUIET_ERRORS = setOf("invalid_profile", "invalid_push_endpoint", "push_provider_unsupported", "rate_limited", "storage_unavailable")
+
+        /** Keeps the connection alive in the background when the user allows it; safe to call while the app is in the foreground. */
+        fun ensureRunning(context: Context) {
+            val prefs = context.getSharedPreferences("line", MODE_PRIVATE)
+            if (!Settings.persistent(context) || prefs.getString("endpoint", "").isNullOrEmpty()) return
+            runCatching { context.startForegroundService(Intent(context, CallService::class.java).setAction(ACTION_CONNECT)) }
+        }
+    }
 
     override fun onDestroy() {
         lockAdmin()
@@ -814,6 +1466,7 @@ class CallService : Service() {
         callOperationEpoch++
         callOperation?.cancel(); callOperation = null
         retryJob?.cancel(); registrationTimeout?.cancel(); callTimeout?.cancel()
+        networkGrace?.cancel(); ackWatchdog?.cancel(); flushRetry?.cancel(); resumeWatch?.cancel()
         incoming.close()
         socket?.cancel(); socket = null
         if (wakeLock?.isHeld == true) wakeLock?.release()

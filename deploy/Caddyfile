@@ -6,3 +6,8 @@ api.example.org {
 rtc.example.org {
     reverse_proxy 127.0.0.1:7880
 }
+
+# Optional: self-hosted ntfy as a UnifiedPush distributor server (see docs/PUSH-SETUP.md and ntfy-server.yml.example).
+# ntfy.example.org {
+#     reverse_proxy 127.0.0.1:2586
+# }

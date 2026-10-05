@@ -8,10 +8,10 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check:data": "node scripts/check-data-compat.mjs"
   },
   "dependencies": {
-    "firebase-admin": "14.5.0",
     "livekit-server-sdk": "2.19.1",
     "ws": "8.22.0"
   }
