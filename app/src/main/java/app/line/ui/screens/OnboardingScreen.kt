@@ -113,7 +113,7 @@ class OnboardingScreen : Screen() {
     private fun codeStep(): View = page {
         addView(FrameLayout(context).apply {
             background = context.accentGradient(14)
-            addView(context.icon("chat", R.color.on_accent, 24), FrameLayout.LayoutParams(context.dp(24), context.dp(24), Gravity.CENTER))
+            addView(context.icon("line", R.color.on_accent, 24), FrameLayout.LayoutParams(context.dp(24), context.dp(24), Gravity.CENTER))
         }, LinearLayout.LayoutParams(context.dp(48), context.dp(48)).apply { bottomMargin = context.dp(28) })
         heading(R.string.cp_ob_code_title, R.string.cp_ob_code_body)
 

@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity(), Host {
 
     private val back = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
+            if (Sheets.dismissTop()) return
             hideKeyboard()
             val top = stack.lastOrNull()
             when {

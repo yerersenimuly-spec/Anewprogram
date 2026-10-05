@@ -117,6 +117,12 @@ object IconPaths {
             IconShape("M10.94 8.82l3.54-3.54a3 3 0 0 1 4.24 4.24l-3.54 3.54"),
             IconShape("M9.88 14.12l4.24-4.24"),
         ),
+        "line" to listOf(
+            IconShape("M7 12h10"),
+            IconShape("M9 8.5v7"),
+            IconShape("M12 6v12"),
+            IconShape("M15 8.5v7"),
+        ),
         "lock" to listOf(
             IconShape("M7.5 10.5h9A2.5 2.5 0 0 1 19 13v5.5A2.5 2.5 0 0 1 16.5 21h-9A2.5 2.5 0 0 1 5 18.5V13a2.5 2.5 0 0 1 2.5-2.5z"),
             IconShape("M8 10.5v-3a4 4 0 0 1 8 0v3"),

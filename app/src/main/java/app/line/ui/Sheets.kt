@@ -2,15 +2,10 @@ package app.line.ui
 
 import android.animation.TimeInterpolator
 import android.app.Activity
-import android.app.Dialog
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.Window
-import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -24,27 +19,17 @@ data class SheetAction(
 )
 
 /**
- * Bottom sheet: the one container for menus, confirmations and short forms.
- * It slides up, closes on outside tap or back, and resizes above the keyboard.
+ * Bottom sheet rendered as a layer of the activity window itself. A floating Dialog window is avoided
+ * on purpose: on some devices its width collapses to the smallest child (the grabber) and the whole
+ * sheet turns into a narrow vertical strip. As a view layer the sheet always spans the screen width.
  */
 class Sheet(private val activity: Activity, private val bottomInset: Int = 0) {
-    private val dialog = Dialog(activity)
     private val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private val container = FrameLayout(activity)
-    var onDismiss: (() -> Unit)? = null
+    private var layer: FrameLayout? = null
     private var closing = false
+    var onDismiss: (() -> Unit)? = null
 
     init {
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.window?.apply {
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setGravity(Gravity.BOTTOM)
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            setDimAmount(0.55f)
-            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-            attributes = attributes.apply { windowAnimations = 0 }
-        }
         val radius = activity.dpf(Dimens.RADIUS_XL.toFloat())
         body.background = GradientDrawable().apply {
             setColor(activity.color(R.color.surface))
@@ -55,12 +40,9 @@ class Sheet(private val activity: Activity, private val bottomInset: Int = 0) {
         body.addView(handle, LinearLayout.LayoutParams(activity.dp(40), activity.dp(5)).apply {
             gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = activity.dp(10)
         })
-        container.addView(body, FrameLayout.LayoutParams(MATCH, WRAP))
-        dialog.setContentView(container)
-        dialog.setCanceledOnTouchOutside(true)
-        dialog.setOnCancelListener { onDismiss?.invoke() }
-        dialog.setOnDismissListener { onDismiss?.invoke().also { onDismiss = null } }
     }
+
+    val isShowing: Boolean get() = layer != null
 
     fun title(text: CharSequence): Sheet = apply {
         body.addView(activity.label(text, TextStyle.TITLE), LinearLayout.LayoutParams(MATCH, WRAP).apply {
@@ -99,21 +81,56 @@ class Sheet(private val activity: Activity, private val bottomInset: Int = 0) {
     }
 
     fun show(): Sheet = apply {
-        dialog.show()
-        container.post {
-            body.translationY = body.height.toFloat()
-            body.animate().translationY(0f).setDuration(220).setInterpolator(DecelerateInterpolator(1.6f)).start()
+        if (layer != null) return this
+        val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return this
+        val scrim = FrameLayout(activity).apply {
+            setBackgroundColor(activity.color(R.color.scrim))
+            isClickable = true
+            setOnClickListener { dismiss() }
+        }
+        val panel = FrameLayout(activity).apply { isClickable = true }
+        panel.addView(body, FrameLayout.LayoutParams(MATCH, WRAP))
+        scrim.addView(panel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        content.addView(scrim, ViewGroup.LayoutParams(MATCH, MATCH))
+        layer = scrim
+        Sheets.shown.add(this)
+        scrim.alpha = 0f
+        scrim.animate().alpha(1f).setDuration(150).start()
+        panel.post {
+            if (layer === scrim) {
+                body.translationY = body.height.toFloat()
+                body.animate().translationY(0f).setDuration(220).setInterpolator(DecelerateInterpolator(1.6f)).start()
+            }
         }
     }
 
     fun dismiss() {
-        if (closing || !dialog.isShowing) return
+        val scrim = layer ?: return
+        if (closing) return
         closing = true
-        body.animate().translationY(body.height.toFloat()).setDuration(160).setInterpolator(TimeInterpolator { it * it })
-            .withEndAction { if (dialog.isShowing) dialog.dismiss() }.start()
+        scrim.animate().alpha(0f).setDuration(160).start()
+        body.animate().translationY(body.height.toFloat()).setDuration(160)
+            .setInterpolator(TimeInterpolator { it * it })
+            .withEndAction {
+                (scrim.parent as? ViewGroup)?.removeView(scrim)
+                if (layer === scrim) layer = null
+                closing = false
+                Sheets.shown.remove(this)
+                onDismiss?.invoke()
+                onDismiss = null
+            }.start()
     }
+}
 
-    val isShowing: Boolean get() = dialog.isShowing
+/** The sheets currently on screen; the newest one consumes the back press. */
+object Sheets {
+    internal val shown = java.util.concurrent.CopyOnWriteArrayList<Sheet>()
+
+    fun dismissTop(): Boolean {
+        val top = shown.lastOrNull() ?: return false
+        top.dismiss()
+        return true
+    }
 }
 
 fun android.content.Context.destructiveButton(text: CharSequence, onClick: () -> Unit) =
